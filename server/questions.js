@@ -1,7 +1,13 @@
 // Arabic trivia question bank
 // Each question has: text, answer, letter (first letter of answer), category, options
-const questions = [
-  // Letter: ب (Ba)
+
+const islamQuestions = require('./questions_islam');
+const scienceQuestions = require('./questions_science');
+const sportsQuestions = require('./questions_sports');
+const geographyQuestions = require('./questions_geography');
+
+// Legacy inline questions kept for backwards compatibility
+const legacyQuestions = [
   {
     id: 1,
     text: "ما هي عاصمة المملكة العربية السعودية؟",
@@ -226,6 +232,14 @@ const questions = [
     category: "جغرافيا",
     options: ["مصر", "العراق", "سوريا", "اليمن"]
   }
+];
+
+const questions = [
+  ...legacyQuestions,
+  ...islamQuestions,
+  ...scienceQuestions,
+  ...sportsQuestions,
+  ...geographyQuestions
 ];
 
 // Arabic letters for Huroof game grid
