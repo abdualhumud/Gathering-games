@@ -5,6 +5,22 @@ const islamQuestions = require('./questions_islam');
 const scienceQuestions = require('./questions_science');
 const sportsQuestions = require('./questions_sports');
 const geographyQuestions = require('./questions_geography');
+const arabGeographyQuestions = require('./questions_arab_geography');
+const animalsQuestions = require('./questions_animals');
+const cultureQuestions = require('./questions_culture');
+const historyQuestions = require('./questions_history');
+const sportsOlympicsQuestions = require('./questions_sports_olympics');
+const arabicLiteratureQuestions = require('./questions_arabic_literature');
+const worldGeoQuestions = require('./questions_world_geo');
+const technologyQuestions = require('./questions_technology');
+const islamicHistoryQuestions = require('./questions_islamic_history');
+const physicsQuestions = require('./questions_physics');
+const foodQuestions = require('./questions_food');
+const quranQuestions = require('./questions_quran');
+const astronomyQuestions = require('./questions_astronomy');
+const generalQuestions = require('./questions_general');
+const biologyQuestions = require('./questions_biology');
+const mathematicsQuestions = require('./questions_mathematics');
 
 // Legacy inline questions kept for backwards compatibility
 const legacyQuestions = [
@@ -239,7 +255,23 @@ const questions = [
   ...islamQuestions,
   ...scienceQuestions,
   ...sportsQuestions,
-  ...geographyQuestions
+  ...geographyQuestions,
+  ...arabGeographyQuestions,
+  ...animalsQuestions,
+  ...cultureQuestions,
+  ...historyQuestions,
+  ...sportsOlympicsQuestions,
+  ...arabicLiteratureQuestions,
+  ...worldGeoQuestions,
+  ...technologyQuestions,
+  ...islamicHistoryQuestions,
+  ...physicsQuestions,
+  ...foodQuestions,
+  ...quranQuestions,
+  ...astronomyQuestions,
+  ...generalQuestions,
+  ...biologyQuestions,
+  ...mathematicsQuestions
 ];
 
 // Arabic letters for Huroof game grid
