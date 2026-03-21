@@ -40,6 +40,20 @@ export default function Home() {
           </div>
           <button className="btn-green game-card-btn">العب الآن</button>
         </div>
+
+        <div className="game-card" onClick={() => navigate('/moneyboard')}>
+          <div className="game-card-icon">💰</div>
+          <h2 className="game-card-title">لوحة المال</h2>
+          <p className="game-card-desc">
+            لعبة جيوباردي — اختر الفئة والصعوبة وأجب صح لجمع أكبر قدر من الريالات
+          </p>
+          <div className="game-card-tags">
+            <span className="tag tag-yellow">جيوباردي</span>
+            <span className="tag tag-orange">فريقان</span>
+            <span className="tag">2+ لاعبين</span>
+          </div>
+          <button className="btn-gold game-card-btn">العب الآن</button>
+        </div>
       </div>
 
       <footer className="home-footer">

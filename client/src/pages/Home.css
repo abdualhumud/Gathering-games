@@ -93,10 +93,26 @@
   color: var(--muted);
 }
 
-.tag-red { background: rgba(233,69,96,0.15); border-color: rgba(233,69,96,0.3); color: #e94560; }
-.tag-blue { background: rgba(59,130,246,0.15); border-color: rgba(59,130,246,0.3); color: #60a5fa; }
-.tag-green { background: rgba(34,197,94,0.15); border-color: rgba(34,197,94,0.3); color: #22c55e; }
+.tag-red    { background: rgba(233,69,96,0.15);  border-color: rgba(233,69,96,0.3);  color: #e94560; }
+.tag-blue   { background: rgba(59,130,246,0.15); border-color: rgba(59,130,246,0.3); color: #60a5fa; }
+.tag-green  { background: rgba(34,197,94,0.15);  border-color: rgba(34,197,94,0.3);  color: #22c55e; }
 .tag-orange { background: rgba(249,115,22,0.15); border-color: rgba(249,115,22,0.3); color: #f97316; }
+.tag-yellow { background: rgba(240,192,64,0.15); border-color: rgba(240,192,64,0.3); color: #f0c040; }
+
+.btn-gold {
+  background: linear-gradient(135deg, #f0c040, #d4920a);
+  color: #000;
+  border: none;
+  font-weight: 800;
+  cursor: pointer;
+  border-radius: 12px;
+  padding: 12px 24px;
+  font-size: 1rem;
+  transition: all 0.2s;
+}
+.btn-gold:hover { background: linear-gradient(135deg, #ffe066, #e8a010); transform: translateY(-1px); }
+
+.games-grid { max-width: 1060px; }
 
 .game-card-btn {
   width: 100%;

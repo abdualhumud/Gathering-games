@@ -6,6 +6,7 @@ const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const { AsbiqhumGame, QUESTION_TIME } = require('./games/asbiqhum');
 const { HuroofGame, ANSWER_TIME } = require('./games/huroof');
+const { MoneyBoardGame, VALID_CATEGORIES, ANSWER_TIME: MB_ANSWER_TIME, STEAL_TIME } = require('./games/moneyboard');
 
 const app = express();
 app.use(cors());
@@ -20,10 +21,11 @@ const io = new Server(server, {
 });
 
 // Room stores
-const asbiqhumRooms = {}; // roomCode -> AsbiqhumGame
-const huroofRooms = {}; // roomCode -> HuroofGame
-const socketRooms = {}; // socketId -> { game, roomCode }
-const roomTimers = {}; // roomCode -> timer
+const asbiqhumRooms  = {}; // roomCode -> AsbiqhumGame
+const huroofRooms    = {}; // roomCode -> HuroofGame
+const moneyRooms     = {}; // roomCode -> MoneyBoardGame
+const socketRooms    = {}; // socketId -> { game, roomCode }
+const roomTimers     = {}; // roomCode -> timer
 
 function generateRoomCode() {
   return Math.random().toString(36).substring(2, 7).toUpperCase();
@@ -39,7 +41,8 @@ function clearRoomTimer(roomCode) {
 // ──────────────────────────────────────────────
 // REST endpoints
 // ──────────────────────────────────────────────
-app.get('/api/health', (req, res) => res.json({ status: 'ok', rooms: { asbiqhum: Object.keys(asbiqhumRooms).length, huroof: Object.keys(huroofRooms).length } }));
+app.get('/api/health', (req, res) => res.json({ status: 'ok', rooms: { asbiqhum: Object.keys(asbiqhumRooms).length, huroof: Object.keys(huroofRooms).length, moneyboard: Object.keys(moneyRooms).length } }));
+app.get('/api/categories', (req, res) => res.json({ categories: VALID_CATEGORIES }));
 
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, '../client/dist/index.html'));
@@ -229,6 +232,95 @@ io.on('connection', (socket) => {
     }
   });
 
+  // ── MONEY BOARD ───────────────────────────
+  socket.on('money:create', ({ playerName, team }) => {
+    const code = generateRoomCode();
+    const game = new MoneyBoardGame(code);
+    game.addPlayer(socket.id, playerName, team || 'A');
+    moneyRooms[code] = game;
+    socketRooms[socket.id] = { game: 'money', roomCode: code };
+    socket.join(code);
+    socket.emit('money:created', { roomCode: code, isHost: true, state: game.getState(), categories: VALID_CATEGORIES });
+    console.log(`[money] room created: ${code} by ${playerName}`);
+  });
+
+  socket.on('money:join', ({ roomCode, playerName, team }) => {
+    const code = roomCode.toUpperCase();
+    const game = moneyRooms[code];
+    if (!game) return socket.emit('error', { message: 'الغرفة غير موجودة' });
+    if (game.state !== 'lobby') return socket.emit('error', { message: 'اللعبة بدأت بالفعل' });
+    game.addPlayer(socket.id, playerName, team || 'A');
+    socketRooms[socket.id] = { game: 'money', roomCode: code };
+    socket.join(code);
+    socket.emit('money:joined', { roomCode: code, isHost: game.isHost(socket.id), state: game.getState(), categories: VALID_CATEGORIES });
+    io.to(code).emit('money:player_joined', { state: game.getState() });
+  });
+
+  socket.on('money:start', ({ selectedCategories }) => {
+    const info = socketRooms[socket.id];
+    if (!info || info.game !== 'money') return;
+    const game = moneyRooms[info.roomCode];
+    if (!game || !game.isHost(socket.id)) return socket.emit('error', { message: 'أنت لست المضيف' });
+    if (!selectedCategories || selectedCategories.length !== 6) return socket.emit('error', { message: 'اختر 6 فئات' });
+    game.startGame(selectedCategories);
+    io.to(info.roomCode).emit('money:game_started', { state: game.getState() });
+    console.log(`[money] game started: ${info.roomCode}`);
+  });
+
+  socket.on('money:select_cell', ({ colIdx, rowIdx }) => {
+    const info = socketRooms[socket.id];
+    if (!info || info.game !== 'money') return;
+    const game = moneyRooms[info.roomCode];
+    if (!game) return;
+    const event = game.selectCell(socket.id, colIdx, rowIdx);
+    if (event) {
+      io.to(info.roomCode).emit('money:cell_selected', event);
+      clearRoomTimer(info.roomCode);
+      roomTimers[info.roomCode] = setTimeout(() => {
+        const result = game.timeUp();
+        if (result) handleMoneyResult(info.roomCode, result);
+      }, MB_ANSWER_TIME * 1000 + 500);
+    }
+  });
+
+  socket.on('money:answer', ({ answerIndex }) => {
+    const info = socketRooms[socket.id];
+    if (!info || info.game !== 'money') return;
+    const game = moneyRooms[info.roomCode];
+    if (!game) return;
+    clearRoomTimer(info.roomCode);
+    const result = game.answer(socket.id, answerIndex);
+    if (result) {
+      if (result.steal) {
+        io.to(info.roomCode).emit('money:steal_chance', result);
+        roomTimers[info.roomCode] = setTimeout(() => {
+          const r2 = game.timeUp();
+          if (r2) handleMoneyResult(info.roomCode, r2);
+        }, STEAL_TIME * 1000 + 500);
+      } else {
+        handleMoneyResult(info.roomCode, result);
+      }
+    }
+  });
+
+  function handleMoneyResult(roomCode, result) {
+    const game = moneyRooms[roomCode];
+    if (!game) return;
+    if (result.steal) {
+      io.to(roomCode).emit('money:steal_chance', result);
+      clearRoomTimer(roomCode);
+      roomTimers[roomCode] = setTimeout(() => {
+        const r2 = game.timeUp();
+        if (r2) handleMoneyResult(roomCode, r2);
+      }, STEAL_TIME * 1000 + 500);
+    } else if (result.gameOver) {
+      io.to(roomCode).emit('money:answer_result', result);
+      io.to(roomCode).emit('money:game_over', game.getResults());
+    } else {
+      io.to(roomCode).emit('money:answer_result', result);
+    }
+  }
+
   // ── DISCONNECT ────────────────────────────
   socket.on('disconnect', () => {
     const info = socketRooms[socket.id];
@@ -239,6 +331,9 @@ io.on('connection', (socket) => {
       } else if (info.game === 'huroof' && huroofRooms[info.roomCode]) {
         huroofRooms[info.roomCode].removePlayer(socket.id);
         io.to(info.roomCode).emit('huroof:player_left', { state: huroofRooms[info.roomCode].getState() });
+      } else if (info.game === 'money' && moneyRooms[info.roomCode]) {
+        moneyRooms[info.roomCode].removePlayer(socket.id);
+        io.to(info.roomCode).emit('money:player_left', { state: moneyRooms[info.roomCode].getState() });
       }
       delete socketRooms[socket.id];
     }
