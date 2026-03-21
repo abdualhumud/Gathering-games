@@ -222,18 +222,17 @@ export default function AsbiqhumPage() {
               <button className="btn-secondary" onClick={local.addPlayer}>إضافة</button>
             </div>
 
-            <div className="players-list" style={{ marginTop: 12 }}>
+            <div className="players-list">
               {local.players.map(p => (
-                <div key={p.name} className="player-item" style={{ justifyContent: 'space-between' }}>
+                <div key={p.name} className="player-item player-item-removable">
                   <span>👤 {p.name}</span>
-                  <button onClick={() => local.removePlayer(p.name)} style={{ background: 'none', border: 'none', color: '#e74c3c', cursor: 'pointer', fontSize: '1.1rem' }}>✕</button>
+                  <button className="remove-player-btn" onClick={() => local.removePlayer(p.name)}>✕</button>
                 </div>
               ))}
             </div>
 
             <button
               className="btn-primary"
-              style={{ marginTop: 16 }}
               onClick={local.startGame}
               disabled={local.players.length < 2}
             >
@@ -260,10 +259,10 @@ export default function AsbiqhumPage() {
 
           {local.screen === 'question' && (
             <div className="local-buzz-buttons">
-              <p style={{ textAlign: 'center', color: 'var(--text-muted)', marginBottom: 8 }}>اضغط زرك للإجابة أولاً!</p>
-              <div className="buzz-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12 }}>
+              <p className="local-buzz-hint">🔔 اضغط زرك للإجابة أولاً!</p>
+              <div className="buzz-grid">
                 {local.players.map((p, i) => (
-                  <button key={p.name} className="buzz-btn player-buzz" onClick={() => local.buzz(i)}>
+                  <button key={p.name} className="player-buzz" onClick={() => local.buzz(i)}>
                     🔔 {p.name}
                   </button>
                 ))}

@@ -280,7 +280,7 @@ export default function MoneyBoardPage() {
     if (local.screen === 'setup') return (
       <div className="page mb-setup">
         <button className="back-btn" onClick={() => setMode(null)}>← العودة</button>
-        <div className="setup-card card pop-in" style={{ maxWidth: 560 }}>
+        <div className="setup-card card pop-in">
           <div className="setup-icon">💰</div>
           <h1>لوحة المال — محلي</h1>
 
@@ -314,7 +314,7 @@ export default function MoneyBoardPage() {
 
           <button
             className="btn-primary"
-            style={{ marginTop: 8 }}
+            className="start-btn-inline"
             onClick={local.startGame}
             disabled={local.selected.length !== 6}
           >
@@ -431,7 +431,7 @@ export default function MoneyBoardPage() {
           <button className="btn-primary" onClick={() => { if (!playerName.trim()) return setError('أدخل اسمك'); setError(''); socket.emit('money:create', { playerName: playerName.trim(), team: selectedTeam }); }}>إنشاء غرفة</button>
           <span className="divider">أو</span>
           <div className="join-row">
-            <input className="input-field join-input" placeholder="رمز الغرفة" value={joinCode} onChange={e => setJoinCode(e.target.value.toUpperCase())} maxLength={6} style={{ textAlign: 'center', letterSpacing: 4, fontSize: '1.2rem' }} />
+            <input className="input-field join-input room-code-input" placeholder="رمز الغرفة" value={joinCode} onChange={e => setJoinCode(e.target.value.toUpperCase())} maxLength={6} />
             <button className="btn-secondary" onClick={() => { if (!playerName.trim()) return setError('أدخل اسمك'); if (!joinCode.trim()) return setError('أدخل رمز الغرفة'); setError(''); socket.emit('money:join', { roomCode: joinCode.trim(), playerName: playerName.trim(), team: selectedTeam }); }}>انضم</button>
           </div>
         </div>
@@ -523,7 +523,7 @@ export default function MoneyBoardPage() {
         {roomResult && (
           <ResultFlash info={roomResult} teamNames={{ A: 'الفريق الأول', B: 'الفريق الثاني' }} />
         )}
-        {!isMyTurn && <p className="waiting-msg pulse" style={{ marginTop: 12 }}>انتظار الفريق الآخر ليختار...</p>}
+        {!isMyTurn && <p className="waiting-msg pulse">انتظار الفريق الآخر ليختار...</p>}
       </div>
     );
   }
@@ -567,7 +567,7 @@ export default function MoneyBoardPage() {
             ))}
           </div>
         ) : (
-          <p className="waiting-msg pulse" style={{ marginTop: 20 }}>ينتظر إجابة {activeTeamName}...</p>
+          <p className="waiting-msg pulse">ينتظر إجابة {activeTeamName}...</p>
         )}
 
         {roomResult && <ResultFlash info={roomResult} teamNames={{ A: 'الفريق الأول', B: 'الفريق الثاني' }} />}
@@ -698,7 +698,7 @@ function GameOverScreen({ teams, winner, isTie, myTeam, onReset, onHome }) {
           </div>
         ))}
       </div>
-      <div style={{ display: 'flex', gap: 12, marginTop: 16 }}>
+      <div className="gameover-actions">
         {onReset && <button className="btn-secondary" onClick={onReset}>العب مجدداً</button>}
         <button className="btn-primary" onClick={onHome}>الرئيسية</button>
       </div>

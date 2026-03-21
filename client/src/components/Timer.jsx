@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import './Timer.css';
 
-export default function Timer({ duration, running, onExpire }) {
+export default function Timer({ duration, running, onEnd }) {
   const [timeLeft, setTimeLeft] = useState(duration);
   const intervalRef = useRef(null);
 
@@ -18,14 +18,14 @@ export default function Timer({ duration, running, onExpire }) {
       setTimeLeft(t => {
         if (t <= 1) {
           clearInterval(intervalRef.current);
-          onExpire?.();
+          onEnd?.();
           return 0;
         }
         return t - 1;
       });
     }, 1000);
     return () => clearInterval(intervalRef.current);
-  }, [running, onExpire]);
+  }, [running, onEnd]);
 
   const pct = (timeLeft / duration) * 100;
   const color = pct > 50 ? 'var(--green)' : pct > 25 ? 'var(--gold)' : 'var(--accent)';

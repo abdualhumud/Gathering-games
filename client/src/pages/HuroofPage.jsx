@@ -234,7 +234,7 @@ export default function HuroofPage() {
                 ))}
               </div>
             </div>
-            <button className="btn-green" style={{ marginTop: 20 }} onClick={local.startGame}>ابدأ اللعبة 🔤</button>
+            <button className="btn-green start-game-btn" onClick={local.startGame}>ابدأ اللعبة 🔤</button>
           </div>
         </div>
       );
@@ -313,7 +313,7 @@ export default function HuroofPage() {
         <div className="page asbiq-gameover">
           <div className="gameover-hero pop-in">
             <div className="gameover-trophy">🏆</div>
-            <h1 style={{ color: local.winner === 'A' ? 'var(--green)' : 'var(--orange)' }}>
+            <h1 className={local.winner === 'A' ? 'winner-a' : 'winner-b'}>
               فاز {local.winner === 'A' ? '🟢 الفريق الأخضر' : '🟠 الفريق البرتقالي'}!
             </h1>
           </div>
@@ -324,7 +324,7 @@ export default function HuroofPage() {
               ))}
             </div>
           </div>
-          <div style={{ display: 'flex', gap: 12, marginTop: 16 }}>
+          <div className="gameover-actions">
             <button className="btn-secondary" onClick={local.reset}>العب مجدداً</button>
             <button className="btn-primary" onClick={() => navigate('/')}>الرئيسية</button>
           </div>
@@ -469,10 +469,10 @@ export default function HuroofPage() {
       <div className="page asbiq-gameover">
         <div className="gameover-hero pop-in">
           <div className="gameover-trophy">{isMyTeamWinner ? '🏆' : '🎮'}</div>
-          <h1 style={{ color: winnerTeam === 'A' ? 'var(--green)' : 'var(--orange)' }}>
+          <h1 className={winnerTeam === 'A' ? 'winner-a' : 'winner-b'}>
             فاز {winnerTeam === 'A' ? '🟢 الفريق الأخضر' : '🟠 الفريق البرتقالي'}!
           </h1>
-          {isMyTeamWinner && <p style={{ color: 'var(--gold)', fontSize: '1.2rem', marginTop: 8 }}>🎉 مبروك لفريقك!</p>}
+          {isMyTeamWinner && <p className="congrats-msg">🎉 مبروك لفريقك!</p>}
         </div>
         {gameState?.grid && (
           <div className="final-grid-wrap">
