@@ -2,6 +2,31 @@
   background: radial-gradient(ellipse at top, #0a1e0a 0%, var(--bg) 70%);
 }
 
+/* Mode selection buttons */
+.mode-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.mode-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 16px 24px;
+  font-size: 1.1rem;
+  font-weight: 700;
+  border-radius: 14px;
+}
+
+.mode-btn small {
+  font-size: 0.78rem;
+  font-weight: 400;
+  opacity: 0.75;
+}
+
 /* Reuse back-btn from Asbiqhum */
 .back-btn {
   position: absolute;
