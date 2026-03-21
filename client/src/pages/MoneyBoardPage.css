@@ -54,6 +54,17 @@
   box-shadow: 0 2px 12px rgba(251,191,36,0.3);
 }
 .cat-chip:disabled:not(.selected) { opacity: 0.3; cursor: not-allowed; }
+.cat-chip-low { border-color: rgba(249,115,22,0.3); }
+
+.cat-q-badge {
+  display: inline-block;
+  margin-right: 5px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  opacity: 0.55;
+  vertical-align: middle;
+}
+.cat-chip.selected .cat-q-badge { opacity: 0.6; }
 
 .cat-num {
   position: absolute;
@@ -269,7 +280,12 @@
 }
 .cell-riyal  { font-size: 0.7rem; color: #c8a830; font-weight: 700; margin-top: 2px; }
 .cell-diff   { display: none; }
-.cell-winner-icon { font-size: 1.8rem; }
+.cell-winner-icon { font-size: 2rem; line-height: 1; }
+
+/* Answered cell team overlays */
+.mb-cell.answered.winner-A { background: #0b1e5e; border: 2px solid rgba(91,154,255,0.5); opacity: 0.85; }
+.mb-cell.answered.winner-B { background: #3a1800; border: 2px solid rgba(249,115,22,0.5); opacity: 0.85; }
+.mb-cell.answered.winner-none { background: #111; border: 2px solid rgba(255,255,255,0.06); opacity: 0.5; }
 
 /* ── Question page ──────────────────────────────────────────────────────── */
 .mb-question-page {
@@ -321,6 +337,17 @@
   border-radius: var(--radius);
   box-shadow: 0 4px 24px rgba(255, 107, 53, 0.4);
   border: 1px solid rgba(255,107,53,0.4);
+}
+
+/* Category tag on question card */
+.question-category-tag {
+  font-size: 0.75rem;
+  font-weight: 800;
+  color: var(--gold);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin: 0 0 12px;
+  opacity: 0.85;
 }
 
 /* Question card */

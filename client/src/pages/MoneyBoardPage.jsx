@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { socket } from '../socket';
 import { questions as allQuestions } from '../questions';
@@ -20,16 +20,26 @@ const TEAM_NAMES  = { A: 'الفريق الأول', B: 'الفريق الثان�
 const TEAM_COLORS = { A: 'team-a', B: 'team-b' };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+// Pre-computed question counts per category (used in setup UI)
+const CATEGORY_Q_COUNT = {};
+VALID_CATEGORIES.forEach(cat => {
+  CATEGORY_Q_COUNT[cat] = allQuestions.filter(q => q.category === cat).length;
+});
+
 function buildLocalBoard(selectedCats) {
+  const fallbackPool = [...allQuestions].sort(() => Math.random() - 0.5);
   return selectedCats.map(cat => {
     const pool = allQuestions.filter(q => q.category === cat);
-    const shuffled = [...pool].sort(() => Math.random() - 0.5);
+    const shuffled = pool.length ? [...pool].sort(() => Math.random() - 0.5) : fallbackPool;
     const third = Math.max(1, Math.floor(shuffled.length / 3));
     return {
       category: cat,
       cells: POINTS.map((pts, i) => {
         const slice = shuffled.slice(i * third, (i + 1) * third);
-        const q = slice.length ? slice[Math.floor(Math.random() * slice.length)] : shuffled[i % shuffled.length];
+        const q = slice.length
+          ? slice[Math.floor(Math.random() * slice.length)]
+          : shuffled[i % Math.max(shuffled.length, 1)] || fallbackPool[i] || null;
         return { points: pts, question: q, answered: false, winner: null };
       }),
     };
@@ -53,6 +63,7 @@ function useLocalGame() {
   const [timerRunning, setTimer]    = useState(false);
   const [answeredCount, setCount]   = useState(0);
   const [selectedAnswer, setSelAns] = useState(null);
+  const timeoutRef                  = useRef(null);
 
   const totalCells = 18;
 
@@ -112,6 +123,7 @@ function useLocalGame() {
   }, [phase, activeCell, board]); // eslint-disable-line
 
   function _resolveAnswer(isCorrect, cell) {
+    clearTimeout(timeoutRef.current);
     if (isCorrect) {
       const winner = activeTeam;
       const newTeams = {
@@ -130,11 +142,14 @@ function useLocalGame() {
       setTeams(newTeams);
       setBoard(newBoard);
       setCount(newCount);
-      setResultInfo({ isCorrect: true, winner, points: cell.points, correctAnswer: cell.question.answer, teams: newTeams });
+      setResultInfo({ isCorrect: true, winner, points: cell.points, correctAnswer: cell.question?.answer, teams: newTeams });
       setPhase('result');
       setTurn(winner); // winner picks next
-      if (newCount >= totalCells) setTimeout(() => setScreen('gameover'), 2200);
-      else setTimeout(() => { setScreen('game'); setPhase('pick'); setActiveCell(null); setResultInfo(null); setSelAns(null); }, 2200);
+      if (newCount >= totalCells) {
+        timeoutRef.current = setTimeout(() => setScreen('gameover'), 2200);
+      } else {
+        timeoutRef.current = setTimeout(() => { setScreen('game'); setPhase('pick'); setActiveCell(null); setResultInfo(null); setSelAns(null); }, 2200);
+      }
     } else {
       if (phase === 'answer') {
         // Offer steal
@@ -157,16 +172,23 @@ function useLocalGame() {
         const newCount = answeredCount + 1;
         setBoard(newBoard);
         setCount(newCount);
-        setResultInfo({ isCorrect: false, winner: null, points: 0, correctAnswer: cell.question.answer, teams });
+        setResultInfo({ isCorrect: false, winner: null, points: 0, correctAnswer: cell.question?.answer, teams });
         setPhase('result');
         setTurn(originalTeam); // original team picks next
-        if (newCount >= totalCells) setTimeout(() => setScreen('gameover'), 2200);
-        else setTimeout(() => { setScreen('game'); setPhase('pick'); setActiveCell(null); setResultInfo(null); setSelAns(null); }, 2200);
+        if (newCount >= totalCells) {
+          timeoutRef.current = setTimeout(() => setScreen('gameover'), 2200);
+        } else {
+          timeoutRef.current = setTimeout(() => { setScreen('game'); setPhase('pick'); setActiveCell(null); setResultInfo(null); setSelAns(null); }, 2200);
+        }
       }
     }
   }
 
+  // Cleanup on unmount
+  useEffect(() => () => clearTimeout(timeoutRef.current), []);
+
   const reset = () => {
+    clearTimeout(timeoutRef.current);
     setScreen('setup');
     setSelected([]);
     setBoard(null);
@@ -192,7 +214,7 @@ function useLocalGame() {
     screen, teamAName, setTeamAName, teamBName, setTeamBName,
     selected, toggleCategory, startGame,
     board, teams, currentTurn, activeTeam, phase,
-    activeCell, currentQuestion, currentPoints,
+    activeCell, pickCell, currentQuestion, currentPoints,
     submitAnswer, timeUp, timerRunning, selectedAnswer,
     resultInfo, reset, answeredCount, totalCells,
   };
@@ -301,11 +323,12 @@ export default function MoneyBoardPage() {
               {VALID_CATEGORIES.map(cat => (
                 <button
                   key={cat}
-                  className={`cat-chip ${local.selected.includes(cat) ? 'selected' : ''}`}
+                  className={`cat-chip ${local.selected.includes(cat) ? 'selected' : ''} ${CATEGORY_Q_COUNT[cat] < 3 ? 'cat-chip-low' : ''}`}
                   onClick={() => local.toggleCategory(cat)}
                   disabled={!local.selected.includes(cat) && local.selected.length >= 6}
                 >
                   {cat}
+                  <span className="cat-q-badge">{CATEGORY_Q_COUNT[cat]}</span>
                   {local.selected.includes(cat) && <span className="cat-num">{local.selected.indexOf(cat) + 1}</span>}
                 </button>
               ))}
@@ -313,8 +336,7 @@ export default function MoneyBoardPage() {
           </div>
 
           <button
-            className="btn-primary"
-            className="start-btn-inline"
+            className="btn-primary start-btn-inline"
             onClick={local.startGame}
             disabled={local.selected.length !== 6}
           >
@@ -349,6 +371,7 @@ export default function MoneyBoardPage() {
     if (local.screen === 'question') {
       const isSteal = local.phase === 'steal';
       const teamName = local.activeTeam === 'A' ? local.teamAName : local.teamBName;
+      const categoryName = local.activeCell ? local.board?.[local.activeCell.colIdx]?.category : '';
       return (
         <div className="mb-question-page">
           <div className="q-page-header">
@@ -371,6 +394,7 @@ export default function MoneyBoardPage() {
           )}
 
           <div className="question-card card pop-in">
+            {categoryName && <p className="question-category-tag">{categoryName}</p>}
             <p className="question-text">{local.currentQuestion?.text}</p>
           </div>
 
@@ -553,6 +577,9 @@ export default function MoneyBoardPage() {
         )}
 
         <div className="question-card card pop-in">
+          {roomCellData != null && gameState?.board?.[roomCellData.colIdx]?.category && (
+            <p className="question-category-tag">{gameState.board[roomCellData.colIdx].category}</p>
+          )}
           <p className="question-text">{roomCellData?.question?.text}</p>
         </div>
 
@@ -597,13 +624,15 @@ export default function MoneyBoardPage() {
 
 function MoneyBoardHeader({ teams, currentTurn, phase, myTeam }) {
   const pickingName = teams[currentTurn]?.name;
+  const pillText = phase === 'pick'
+    ? `🎯 دور ${pickingName} — اختر سؤالاً`
+    : phase === 'wait'
+      ? `⏳ انتظار ${pickingName}...`
+      : `🎯 ${pickingName}`;
   return (
     <div className="mb-header">
       <MoneyScores teams={teams} currentTurn={currentTurn} myTeam={myTeam} />
-      <div className={`turn-pill ${TEAM_COLORS[currentTurn]}`}>
-        {phase === 'pick' ? `دور ${pickingName} — اختر سؤالاً` : ''}
-        {phase === 'wait' ? `انتظار ${pickingName}...` : ''}
-      </div>
+      <div className={`turn-pill ${TEAM_COLORS[currentTurn]}`}>{pillText}</div>
     </div>
   );
 }
@@ -648,12 +677,13 @@ function BoardGrid({ board, activeCell, onPickCell, canPick, currentTurn }) {
                 disabled={cell.answered || !canPick}
               >
                 {cell.answered ? (
-                  <span className="cell-winner-icon">{cell.winner === 'A' ? '🔵' : cell.winner === 'B' ? '🟠' : '—'}</span>
+                  <span className="cell-winner-icon">
+                    {cell.winner === 'A' ? '🔵' : cell.winner === 'B' ? '🟠' : '✖'}
+                  </span>
                 ) : (
                   <>
                     <span className="cell-points">{cell.points}</span>
                     <span className="cell-riyal">ريال</span>
-                    <span className="cell-diff">{DIFF_LABEL[rowIdx]}</span>
                   </>
                 )}
               </button>
