@@ -181,86 +181,95 @@
   max-width: 940px;
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 4px;
+  background: #000;
+  padding: 4px;
+  border-radius: 6px;
 }
 
 .mb-board-row {
   display: grid;
   grid-template-columns: repeat(6, 1fr);
-  gap: 5px;
+  gap: 4px;
 }
 
 /* Category header cells */
 .mb-header-cell {
-  background: linear-gradient(180deg, #0f1e7a, #0a1560);
+  background: #06068c;
   color: #fff;
   text-align: center;
-  padding: 10px 6px;
-  border-radius: var(--radius-sm);
-  font-size: 0.72rem;
-  font-weight: 800;
-  line-height: 1.35;
-  border: 1px solid #1a2ea8;
-  min-height: 54px;
+  padding: 12px 6px;
+  border-radius: 4px;
+  font-size: 0.82rem;
+  font-weight: 900;
+  line-height: 1.3;
+  border: none;
+  min-height: 64px;
   display: flex;
   align-items: center;
   justify-content: center;
+  text-shadow: 1px 1px 4px rgba(0,0,0,0.8);
+  letter-spacing: 0.02em;
 }
 
 /* Money cells */
 .mb-cell {
   position: relative;
-  background: linear-gradient(180deg, #0e2080, #08155e);
-  border: 2px solid #1a2ea8;
-  border-radius: var(--radius-sm);
-  min-height: 68px;
+  background: #06068c;
+  border: none;
+  border-radius: 4px;
+  min-height: 80px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: all 0.18s ease;
-  gap: 2px;
-  padding: 6px 4px;
+  transition: background 0.15s ease, transform 0.15s ease;
+  gap: 0;
+  padding: 8px 4px;
 }
 
 .mb-cell.pickable:hover {
-  background: linear-gradient(180deg, #1a3acc, #0e2080);
-  border-color: var(--gold);
-  transform: scale(1.04) translateY(-2px);
-  box-shadow: 0 6px 24px rgba(240,192,64,0.35);
+  background: #1414c8;
+  transform: scale(1.03) translateY(-2px);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.6);
   z-index: 2;
 }
 
 .mb-cell.active-cell {
-  background: linear-gradient(180deg, #1a3acc, #0e2080);
-  border-color: var(--gold);
-  box-shadow: 0 0 20px rgba(240,192,64,0.5);
+  background: #1414c8;
+  outline: 3px solid var(--gold);
+  outline-offset: -3px;
+  box-shadow: 0 0 18px rgba(240,192,64,0.45);
 }
 
 /* Answered states */
 .mb-cell.answered { cursor: default; }
 .mb-cell.answered.winner-A {
-  background: linear-gradient(180deg, #0c2b6e, #081a4a);
-  border-color: rgba(91,154,255,0.4);
-  opacity: 0.75;
+  background: #04044e;
+  opacity: 0.7;
 }
 .mb-cell.answered.winner-B {
-  background: linear-gradient(180deg, #3a1800, #251000);
-  border-color: rgba(249,115,22,0.4);
-  opacity: 0.75;
+  background: #3a1400;
+  opacity: 0.7;
 }
 .mb-cell.answered.winner-none {
-  background: #111;
-  border-color: rgba(255,255,255,0.05);
-  opacity: 0.45;
+  background: #0a0a0a;
+  opacity: 0.5;
 }
 .mb-cell:disabled { cursor: not-allowed; }
 
-.cell-points { font-size: 1.35rem; font-weight: 900; color: var(--gold); letter-spacing: -0.5px; line-height: 1; }
-.cell-riyal  { font-size: 0.65rem; color: #c8a830; font-weight: 700; }
-.cell-diff   { font-size: 0.62rem; color: #6677bb; margin-top: 1px; }
-.cell-winner-icon { font-size: 1.4rem; }
+.cell-points {
+  font-size: 2.4rem;
+  font-weight: 900;
+  color: #f0c040;
+  letter-spacing: -1px;
+  line-height: 1;
+  text-shadow: 0 2px 8px rgba(0,0,0,0.7), 0 0 20px rgba(240,192,64,0.3);
+}
+.cell-riyal  { font-size: 0.7rem; color: #c8a830; font-weight: 700; margin-top: 2px; }
+.cell-diff   { display: none; }
+.cell-winner-icon { font-size: 1.8rem; }
 
 /* ── Question page ──────────────────────────────────────────────────────── */
 .mb-question-page {
@@ -404,11 +413,12 @@
 
 /* ── Responsive ─────────────────────────────────────────────────────────── */
 @media (max-width: 640px) {
+  .mb-board { gap: 3px; padding: 3px; }
   .mb-board-row { gap: 3px; }
-  .mb-header-cell { font-size: 0.58rem; padding: 6px 2px; min-height: 44px; }
-  .mb-cell { min-height: 54px; }
-  .cell-points { font-size: 1.1rem; }
-  .cell-riyal, .cell-diff { font-size: 0.56rem; }
+  .mb-header-cell { font-size: 0.6rem; padding: 6px 2px; min-height: 48px; }
+  .mb-cell { min-height: 58px; }
+  .cell-points { font-size: 1.55rem; letter-spacing: -0.5px; }
+  .cell-riyal { font-size: 0.55rem; }
   .money-score-box { padding: 9px 10px; max-width: 160px; }
   .score-money { font-size: 0.95rem; }
   .points-badge { font-size: 0.85rem; padding: 7px 14px; }
@@ -416,8 +426,9 @@
 }
 
 @media (max-width: 380px) {
+  .mb-board { gap: 2px; padding: 2px; }
   .mb-board-row { gap: 2px; }
-  .mb-header-cell { font-size: 0.5rem; min-height: 38px; }
-  .mb-cell { min-height: 44px; }
-  .cell-points { font-size: 0.9rem; }
+  .mb-header-cell { font-size: 0.5rem; min-height: 40px; }
+  .mb-cell { min-height: 46px; }
+  .cell-points { font-size: 1.2rem; }
 }
