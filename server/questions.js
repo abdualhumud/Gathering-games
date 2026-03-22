@@ -21,6 +21,15 @@ const astronomyQuestions = require('./questions_astronomy');
 const generalQuestions = require('./questions_general');
 const biologyQuestions = require('./questions_biology');
 const mathematicsQuestions = require('./questions_mathematics');
+// New categories
+const moviesQuestions = require('./questions_movies');
+const musicQuestions = require('./questions_music');
+const arabicLangQuestions = require('./questions_arabic_lang');
+const environmentQuestions = require('./questions_environment');
+const travelQuestions = require('./questions_travel');
+const economyQuestions = require('./questions_economy');
+const healthQuestions = require('./questions_health');
+const entertainmentQuestions = require('./questions_entertainment');
 
 // Legacy inline questions kept for backwards compatibility
 const legacyQuestions = [
@@ -271,7 +280,15 @@ const questions = [
   ...astronomyQuestions,
   ...generalQuestions,
   ...biologyQuestions,
-  ...mathematicsQuestions
+  ...mathematicsQuestions,
+  ...moviesQuestions,
+  ...musicQuestions,
+  ...arabicLangQuestions,
+  ...environmentQuestions,
+  ...travelQuestions,
+  ...economyQuestions,
+  ...healthQuestions,
+  ...entertainmentQuestions,
 ];
 
 // Arabic letters for Huroof game grid

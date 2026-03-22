@@ -6,7 +6,7 @@ const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const { AsbiqhumGame, QUESTION_TIME } = require('./games/asbiqhum');
 const { HuroofGame, ANSWER_TIME } = require('./games/huroof');
-const { MoneyBoardGame, VALID_CATEGORIES, ANSWER_TIME: MB_ANSWER_TIME, STEAL_TIME } = require('./games/moneyboard');
+const { MoneyBoardGame, VALID_CATEGORIES, ANSWER_TIME: MB_ANSWER_TIME, STEAL_TIME, EXTRA_TIME } = require('./games/moneyboard');
 
 const app = express();
 app.use(cors());
@@ -301,6 +301,46 @@ io.on('connection', (socket) => {
         handleMoneyResult(info.roomCode, result);
       }
     }
+  });
+
+  socket.on('money:super_power', ({ power }) => {
+    const info = socketRooms[socket.id];
+    if (!info || info.game !== 'money') return;
+    const game = moneyRooms[info.roomCode];
+    if (!game) return;
+    const result = game.activateSuperPower(socket.id, power);
+    if (result) {
+      io.to(info.roomCode).emit('money:super_power_used', result);
+      // If extraTime, extend the current timer
+      if (power === 'extraTime') {
+        clearRoomTimer(info.roomCode);
+        const isSteal = game.state === 'steal';
+        const baseTime = isSteal ? STEAL_TIME : MB_ANSWER_TIME;
+        roomTimers[info.roomCode] = setTimeout(() => {
+          const r = game.timeUp();
+          if (r) handleMoneyResult(info.roomCode, r);
+        }, (baseTime + EXTRA_TIME) * 1000 + 500);
+      }
+    }
+  });
+
+  socket.on('money:operator_adjust', ({ team, amount }) => {
+    const info = socketRooms[socket.id];
+    if (!info || info.game !== 'money') return;
+    const game = moneyRooms[info.roomCode];
+    if (!game || !game.isHost(socket.id)) return;
+    const result = game.operatorAdjust(team, amount);
+    if (result) io.to(info.roomCode).emit('money:teams_updated', result);
+  });
+
+  socket.on('money:operator_skip', () => {
+    const info = socketRooms[socket.id];
+    if (!info || info.game !== 'money') return;
+    const game = moneyRooms[info.roomCode];
+    if (!game || !game.isHost(socket.id)) return;
+    clearRoomTimer(info.roomCode);
+    const result = game.operatorSkipQuestion();
+    if (result) handleMoneyResult(info.roomCode, result);
   });
 
   function handleMoneyResult(roomCode, result) {
