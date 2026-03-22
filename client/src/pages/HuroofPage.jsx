@@ -1,492 +1,755 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { socket } from '../socket';
-import { getRandomLetters, getQuestionsByLetter, getRandomQuestion } from '../questions';
+import { getQuestionsByLetter, getRandomQuestion } from '../questions';
 import Timer from '../components/Timer';
+import HUROOF_THEMES, {
+  getSavedTheme, saveTheme, buildCustomTheme, applyThemeCSS,
+} from '../data/huroof-themes';
 import './HuroofPage.css';
 
-const ANSWER_TIME = 30;
-const GRID_SIZES = { small: 4, medium: 5, large: 6 };
+// ── Constants ──────────────────────────────────────────────────────────────────
+const BUZZER_TIME = 8;   // seconds before buzzer window closes (no winner)
+const ANSWER_TIME = 30;  // seconds to answer after buzzing in
+const STEAL_TIME  = 15;  // seconds per steal attempt
+const PRE_Q_DELAY = 1800; // ms to show active hex before buzzer opens
 
-// ─── Win check (BFS) ─────────────────────────────────────────────────────────
+const ARABIC_LETTERS = [
+  'ا','ب','ت','ث','ج','ح','خ','د','ذ','ر',
+  'ز','س','ش','ص','ض','ط','ظ','ع','غ','ف',
+  'ق','ك','ل','م','ن','ه','و','ي',
+];
 
-function checkWin(grid, gridN, team) {
-  const owned = new Set(grid.filter(c => c.owner === team).map(c => c.index));
-  const startCells = team === 'A'
-    ? grid.filter(c => c.row === 0 && owned.has(c.index)).map(c => c.index)
-    : grid.filter(c => c.col === 0 && owned.has(c.index)).map(c => c.index);
-  const visited = new Set(startCells);
-  const queue = [...startCells];
-  while (queue.length > 0) {
-    const idx = queue.shift();
-    const cell = grid[idx];
-    if (team === 'A' && cell.row === gridN - 1) return true;
-    if (team === 'B' && cell.col === gridN - 1) return true;
-    const dirs = [[-1,0],[1,0],[0,-1],[0,1],[-1,1],[1,-1]];
-    for (const [dr, dc] of dirs) {
-      const nr = cell.row + dr, nc = cell.col + dc;
-      if (nr >= 0 && nr < gridN && nc >= 0 && nc < gridN) {
-        const nIdx = nr * gridN + nc;
-        if (owned.has(nIdx) && !visited.has(nIdx)) { visited.add(nIdx); queue.push(nIdx); }
-      }
-    }
-  }
-  return false;
-}
+// 19-hex honeycomb: 5 rows [3, 4, 5, 4, 3]
+// Row 0: indices 0-2   Row 1: 3-6   Row 2: 7-11   Row 3: 12-15   Row 4: 16-18
+const HEX_ROWS    = [3, 4, 5, 4, 3];
+const TOTAL_HEXES = 19;
+const CENTER_IDX  = 9; // row 2, col 2
 
-function buildGrid(gridN) {
-  const letters = getRandomLetters(gridN * gridN);
-  return Array.from({ length: gridN * gridN }, (_, i) => ({
-    index: i, row: Math.floor(i / gridN), col: i % gridN,
-    letter: letters[i], owner: null,
+// Pre-computed adjacency (pointy-top hexes, same-row flat edges + inter-row)
+const HEX_ADJ = {
+  0:  [1, 3, 4],
+  1:  [0, 2, 4, 5],
+  2:  [1, 5, 6],
+  3:  [0, 4, 7, 8],
+  4:  [0, 1, 3, 5, 8, 9],
+  5:  [1, 2, 4, 6, 9, 10],
+  6:  [2, 5, 10, 11],
+  7:  [3, 8, 12],
+  8:  [3, 4, 7, 9, 12, 13],
+  9:  [4, 5, 8, 10, 13, 14],  // CENTER
+  10: [5, 6, 9, 11, 14, 15],
+  11: [6, 10, 15],
+  12: [7, 8, 13, 16],
+  13: [8, 9, 12, 14, 16, 17],
+  14: [9, 10, 13, 15, 17, 18],
+  15: [10, 11, 14, 18],
+  16: [12, 13, 17],
+  17: [13, 14, 16, 18],
+  18: [14, 15, 17],
+};
+
+const DEFAULT_TEAM_COLORS = ['#22c55e','#f97316','#3b82f6','#a855f7','#ef4444','#eab308'];
+const DEFAULT_TEAM_NAMES  = [
+  'الفريق الأخضر','الفريق البرتقالي','الفريق الأزرق',
+  'الفريق البنفسجي','الفريق الأحمر','الفريق الذهبي',
+];
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
+function buildHexGrid() {
+  const pool = [...ARABIC_LETTERS].sort(() => Math.random() - 0.5);
+  return Array.from({ length: TOTAL_HEXES }, (_, i) => ({
+    index: i,
+    letter: pool[i % pool.length],
+    owner: null, // null | teamIndex
   }));
 }
 
-// ─── Local game logic ─────────────────────────────────────────────────────────
+function getOwnedByTeam(hexGrid, teamIdx) {
+  return hexGrid.filter(h => h.owner === teamIdx).map(h => h.index);
+}
 
-function useLocalGame() {
-  const [screen, setScreen] = useState('setup'); // setup | game | gameover
-  const [gridSize, setGridSize] = useState('medium');
-  const [grid, setGrid] = useState([]);
-  const [gridN, setGridN] = useState(5);
-  const [currentTurn, setCurrentTurn] = useState('A');
-  const [gamePhase, setGamePhase] = useState('selecting'); // selecting | answering
-  const [selectedCell, setSelectedCell] = useState(null);
+function getSelectableForTeam(hexGrid, teamIdx, isFirstRound) {
+  if (isFirstRound) return [CENTER_IDX];
+  const owned = new Set(getOwnedByTeam(hexGrid, teamIdx));
+  if (owned.size === 0) {
+    // No hexes owned yet — pick any unowned hex adjacent to center (or any unowned)
+    return hexGrid.filter(h => h.owner === null).map(h => h.index);
+  }
+  const adj = new Set();
+  for (const idx of owned) {
+    for (const n of HEX_ADJ[idx] ?? []) {
+      if (hexGrid[n].owner === null) adj.add(n);
+    }
+  }
+  if (adj.size > 0) return [...adj];
+  // Fallback: any unowned hex
+  return hexGrid.filter(h => h.owner === null).map(h => h.index);
+}
+
+function makeRgba(hex, alpha) {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+// ── Setup sub-component ────────────────────────────────────────────────────────
+function SetupScreen({ onStart, navigate }) {
+  const [numTeams, setNumTeams]   = useState(2);
+  const [teamNames, setTeamNames] = useState([...DEFAULT_TEAM_NAMES]);
+  const [teamColors, setTeamColors] = useState([...DEFAULT_TEAM_COLORS]);
+  const [themeId, setThemeId]     = useState(() => getSavedTheme().id || 'classic');
+  const [customA, setCustomA]     = useState('#22c55e');
+  const [customB, setCustomB]     = useState('#f97316');
+
+  useEffect(() => {
+    if (themeId !== 'custom') {
+      const t = HUROOF_THEMES[themeId];
+      if (t) applyThemeCSS(t);
+    } else {
+      applyThemeCSS(buildCustomTheme(customA, customB));
+    }
+  }, [themeId, customA, customB]);
+
+  const handleStart = () => {
+    const teams = Array.from({ length: numTeams }, (_, i) => ({
+      name:  teamNames[i] || DEFAULT_TEAM_NAMES[i],
+      color: teamColors[i] || DEFAULT_TEAM_COLORS[i],
+      score: 0,
+    }));
+    onStart(teams);
+  };
+
+  return (
+    <div className="page huroof-setup">
+      <button className="back-btn" onClick={() => navigate('/')}>← العودة</button>
+      <div className="setup-card card pop-in">
+        <div className="setup-icon">⬡</div>
+        <h1>لعبة الحروف</h1>
+        <p className="setup-desc">
+          تنافس على احتلال خلايا شبكة الحروف — الفريق الأسرع في الضغط يجيب أولاً
+        </p>
+
+        {/* Number of teams */}
+        <div className="grid-size-select">
+          <label>عدد الفرق:</label>
+          <div className="size-btns">
+            {[2, 3, 4].map(n => (
+              <button
+                key={n}
+                className={`size-btn ${numTeams === n ? 'selected' : ''}`}
+                onClick={() => setNumTeams(n)}
+              >
+                {n} فرق
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Team names + colors */}
+        <div className="huroof-teams-config">
+          {Array.from({ length: numTeams }, (_, i) => (
+            <div key={i} className="huroof-team-row">
+              <input
+                type="color"
+                value={teamColors[i]}
+                onChange={e => {
+                  const next = [...teamColors]; next[i] = e.target.value; setTeamColors(next);
+                }}
+                className="team-color-picker"
+              />
+              <input
+                className="input-field team-name-input"
+                value={teamNames[i]}
+                onChange={e => {
+                  const next = [...teamNames]; next[i] = e.target.value; setTeamNames(next);
+                }}
+                maxLength={20}
+                placeholder={`اسم الفريق ${i + 1}`}
+              />
+            </div>
+          ))}
+        </div>
+
+        {/* Theme picker */}
+        <div className="theme-picker">
+          <label>ثيم اللعبة:</label>
+          <div className="theme-presets">
+            {Object.values(HUROOF_THEMES).map(t => (
+              <button
+                key={t.id}
+                title={t.name}
+                className={`theme-swatch ${themeId === t.id ? 'active' : ''}`}
+                style={{ '--swatch-a': t.teamA.main, '--swatch-b': t.teamB.main }}
+                onClick={() => { setThemeId(t.id); saveTheme(t.id); }}
+              >
+                <span style={{ background: t.teamA.main }} />
+                <span style={{ background: t.teamB.main }} />
+              </button>
+            ))}
+            <button
+              title="مخصص"
+              className={`theme-swatch ${themeId === 'custom' ? 'active' : ''}`}
+              onClick={() => setThemeId('custom')}
+            >
+              <span style={{ background: customA }} />
+              <span style={{ background: customB }} />
+            </button>
+          </div>
+          {themeId === 'custom' && (
+            <div className="custom-theme-row">
+              <label>أ:</label>
+              <input type="color" value={customA} onChange={e => setCustomA(e.target.value)} />
+              <label>ب:</label>
+              <input type="color" value={customB} onChange={e => setCustomB(e.target.value)} />
+            </div>
+          )}
+        </div>
+
+        <button className="btn-green start-game-btn" onClick={handleStart}>
+          ابدأ اللعبة ⬡
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Hex Grid ───────────────────────────────────────────────────────────────────
+function HexGrid({ hexGrid, teams, activeHexIdx, selectableIdxs, onSelectHex, phase }) {
+  let rowStart = 0;
+  return (
+    <div className="hex-grid-container">
+      <div className="hex-grid" dir="ltr">
+        {HEX_ROWS.map((count, rowIdx) => {
+          const hexesInRow = hexGrid.slice(rowStart, rowStart + count);
+          const isOdd = rowIdx % 2 === 1;
+          rowStart += count;
+          return (
+            <div key={rowIdx} className={`hex-row ${isOdd ? 'hex-row-odd' : ''}`}>
+              {hexesInRow.map((hex) => {
+                const isOwned    = hex.owner !== null;
+                const isActive   = hex.index === activeHexIdx;
+                const isSelect   = selectableIdxs.includes(hex.index);
+                const isCenter   = hex.index === CENTER_IDX;
+                const ownerTeam  = isOwned ? teams[hex.owner] : null;
+                const canClick   = phase === 'path-select' && isSelect;
+
+                return (
+                  <button
+                    key={hex.index}
+                    className={[
+                      'hex-cell',
+                      isOwned ? 'hex-owned' : '',
+                      isActive ? 'selected-cell' : '',
+                      isSelect && !isOwned ? 'adjacent-selectable' : '',
+                      isCenter && !isOwned && phase !== 'path-select' ? 'center-hex' : '',
+                      canClick ? 'clickable' : '',
+                    ].filter(Boolean).join(' ')}
+                    style={ownerTeam ? {
+                      '--cell-color':     ownerTeam.color,
+                      '--cell-color-dim': makeRgba(ownerTeam.color, 0.18),
+                    } : {}}
+                    onClick={() => canClick && onSelectHex(hex.index)}
+                    disabled={!canClick}
+                  >
+                    <div className="hex-cell-inner">{hex.letter}</div>
+                  </button>
+                );
+              })}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── Score Bar ──────────────────────────────────────────────────────────────────
+function ScoreBar({ teams, controlTeamIdx }) {
+  return (
+    <div className="score-bar">
+      {teams.map((t, i) => (
+        <div
+          key={i}
+          className={`score-item ${controlTeamIdx === i ? 'score-active' : ''}`}
+          style={{
+            '--sc': t.color,
+            '--sc-dim': makeRgba(t.color, 0.15),
+            '--sc-border': makeRgba(t.color, 0.35),
+          }}
+        >
+          <span className="score-dot" style={{ background: t.color }} />
+          <span>{t.name}</span>
+          <span className="score-pts">{t.score}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── Buzzer Panel ───────────────────────────────────────────────────────────────
+function BuzzerPanel({ teams, buzzedTeamIdx, onBuzz, timerRunning, onTimerEnd }) {
+  return (
+    <div className="buzzer-overlay">
+      <div className="buzzer-card">
+        <div className="buzzer-title">
+          {buzzedTeamIdx === null ? '⚡ اضغط الجرس أولاً!' : `🎯 ${teams[buzzedTeamIdx].name}`}
+        </div>
+        {buzzedTeamIdx === null && (
+          <Timer duration={BUZZER_TIME} running={timerRunning} onEnd={onTimerEnd} key="buzzer-timer" />
+        )}
+        <div className="buzzer-teams">
+          {teams.map((t, i) => (
+            <button
+              key={i}
+              className={`buzzer-team-btn ${buzzedTeamIdx === i ? 'pressed' : ''}`}
+              style={{
+                '--bt': t.color,
+                '--bt-dim': makeRgba(t.color, 0.2),
+                '--bt-glow': makeRgba(t.color, 0.4),
+              }}
+              onClick={() => buzzedTeamIdx === null && onBuzz(i)}
+              disabled={buzzedTeamIdx !== null}
+            >
+              {t.name}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Answer Panel ───────────────────────────────────────────────────────────────
+function AnswerPanel({ question, letter, activeTeam, isSteal, stealTeam, selectedAnswer, onAnswer, timerRunning, onTimerEnd }) {
+  const team = isSteal ? stealTeam : activeTeam;
+  return (
+    <div className="buzzer-overlay">
+      <div className="buzzer-card">
+        {isSteal && (
+          <div className="steal-banner steal-banner-overlay pop-in">
+            ⚡ فرصة السرقة — {stealTeam?.name}
+          </div>
+        )}
+        <div className="buzzer-title" style={{ color: team?.color }}>
+          {team?.name}
+        </div>
+        <div className="q-letter-badge" style={{ background: team?.color, color: '#fff' }}>
+          {letter}
+        </div>
+        <p className="buzzer-question">{question?.text}</p>
+        <Timer
+          duration={isSteal ? STEAL_TIME : ANSWER_TIME}
+          running={timerRunning}
+          onEnd={onTimerEnd}
+          key={isSteal ? 'steal' : 'answer'}
+        />
+        <div className="buzzer-options">
+          {question?.options?.map((opt, i) => (
+            <button
+              key={i}
+              className={`buzzer-option-btn ${selectedAnswer === i ? 'answered' : ''}`}
+              onClick={() => selectedAnswer === null && onAnswer(i)}
+              disabled={selectedAnswer !== null}
+            >
+              {opt}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Result Flash ───────────────────────────────────────────────────────────────
+function ResultFlash({ result }) {
+  if (!result) return null;
+  const cls = result.type === 'correct' ? 'correct' : result.type === 'timeout' ? 'wrong' : 'wrong';
+  return (
+    <div className={`result-flash pop-in ${cls}`}>
+      {result.type === 'correct' && `✅ ${result.teamName} — إجابة صحيحة!`}
+      {result.type === 'wrong' && `❌ خطأ — الصواب: ${result.correctAnswer}`}
+      {result.type === 'timeout' && `⏰ انتهى الوقت — الصواب: ${result.correctAnswer}`}
+      {result.type === 'no-buzz' && '⏱ لم يضغط أحد الجرس — تجاوز الخلية'}
+    </div>
+  );
+}
+
+// ── Main Game Hook ─────────────────────────────────────────────────────────────
+function useHuroofGame(teams) {
+  const [hexGrid, setHexGrid]         = useState(() => buildHexGrid());
+  const [phase, setPhase]             = useState('pre-question');
+  // 'pre-question' | 'buzzing' | 'answering' | 'steal' | 'result' | 'path-select' | 'gameover'
+  const [activeHexIdx, setActiveHexIdx] = useState(CENTER_IDX);
+  const [controlTeamIdx, setControlTeamIdx] = useState(null); // who picks next
+  const [buzzedTeamIdx, setBuzzedTeamIdx]   = useState(null);
   const [currentQuestion, setCurrentQuestion] = useState(null);
-  const [selectedAnswer, setSelectedAnswer] = useState(null);
-  const [timerRunning, setTimerRunning] = useState(false);
-  const [resultMessage, setResultMessage] = useState(null);
-  const [winner, setWinner] = useState(null);
+  const [selectedAnswer, setSelectedAnswer]   = useState(null);
+  const [resultInfo, setResultInfo]           = useState(null);
+  const [buzzerRunning, setBuzzerRunning]     = useState(false);
+  const [answerRunning, setAnswerRunning]     = useState(false);
+  const [teamsState, setTeamsState]           = useState(teams);
+  const [round, setRound]                     = useState(1);
+  const [stealQueue, setStealQueue]           = useState([]); // teams that haven't stolen yet
+  const [isSteal, setIsSteal]                 = useState(false);
+  const [selectableIdxs, setSelectableIdxs]   = useState([CENTER_IDX]);
+  const preQTimeout = useRef(null);
 
-  const startGame = () => {
-    const n = GRID_SIZES[gridSize] || 5;
-    setGridN(n);
-    setGrid(buildGrid(n));
-    setCurrentTurn('A');
-    setGamePhase('selecting');
-    setSelectedCell(null);
-    setCurrentQuestion(null);
-    setSelectedAnswer(null);
-    setTimerRunning(false);
-    setResultMessage(null);
-    setWinner(null);
-    setScreen('game');
-  };
+  // Load question for active hex
+  const loadQuestion = useCallback((hexIdx, grid) => {
+    const hex = grid[hexIdx];
+    const qs = getQuestionsByLetter ? getQuestionsByLetter(hex.letter) : [];
+    return qs.length > 0
+      ? qs[Math.floor(Math.random() * qs.length)]
+      : (getRandomQuestion ? getRandomQuestion() : null);
+  }, []);
 
-  const selectCell = (index) => {
-    if (gamePhase !== 'selecting') return;
-    const cell = grid[index];
-    if (!cell || cell.owner !== null) return;
-    const letterQs = getQuestionsByLetter(cell.letter);
-    const q = letterQs.length > 0
-      ? letterQs[Math.floor(Math.random() * letterQs.length)]
-      : getRandomQuestion();
-    setSelectedCell(index);
+  // Start buzzer phase for current active hex
+  const startBuzzer = useCallback((grid, hexIdx) => {
+    const q = loadQuestion(hexIdx, grid);
     setCurrentQuestion(q);
+    setBuzzedTeamIdx(null);
     setSelectedAnswer(null);
-    setGamePhase('answering');
-    setTimerRunning(true);
-  };
+    setResultInfo(null);
+    setIsSteal(false);
+    setStealQueue([]);
+    setPhase('buzzing');
+    setBuzzerRunning(true);
+    setAnswerRunning(false);
+  }, [loadQuestion]);
 
-  const submitAnswer = (answerIdx) => {
-    if (gamePhase !== 'answering') return;
+  // Initialize: pre-question delay then open buzzer
+  useEffect(() => {
+    preQTimeout.current = setTimeout(() => {
+      startBuzzer(hexGrid, CENTER_IDX);
+    }, PRE_Q_DELAY);
+    return () => clearTimeout(preQTimeout.current);
+  }, []); // eslint-disable-line
+
+  // Team buzzes in
+  const onBuzz = useCallback((teamIdx) => {
+    setBuzzedTeamIdx(teamIdx);
+    setBuzzerRunning(false);
+    setPhase('answering');
+    setAnswerRunning(true);
+    // Build steal queue (all other teams, in order)
+    setStealQueue(teams.map((_, i) => i).filter(i => i !== teamIdx));
+  }, [teams]);
+
+  // No one buzzed in time
+  const onBuzzerTimeout = useCallback(() => {
+    setBuzzerRunning(false);
+    setResultInfo({ type: 'no-buzz', correctAnswer: currentQuestion?.answer });
+    setPhase('result');
+    // After result: pick next selectable hex if control team exists, else pass turn
+    setTimeout(() => {
+      setResultInfo(null);
+      // Mark hex as claimed by nobody (skip)
+      setHexGrid(prev => {
+        const next = prev.map((h, i) => i === activeHexIdx ? { ...h, owner: -1 } : h);
+        advanceRound(next, controlTeamIdx, round);
+        return next;
+      });
+    }, 2200);
+  }, [currentQuestion, activeHexIdx, controlTeamIdx, round]); // eslint-disable-line
+
+  // Player submits answer
+  const onAnswer = useCallback((answerIdx) => {
+    setAnswerRunning(false);
     setSelectedAnswer(answerIdx);
-    setTimerRunning(false);
-    const isCorrect = currentQuestion.options[answerIdx] === currentQuestion.answer;
-    let newGrid = grid.map((c, i) =>
-      i === selectedCell && isCorrect ? { ...c, owner: currentTurn } : c
-    );
-    if (isCorrect && checkWin(newGrid, gridN, currentTurn)) {
-      setGrid(newGrid);
-      setWinner(currentTurn);
-      setScreen('gameover');
+    const isCorrect = currentQuestion?.options?.[answerIdx] === currentQuestion?.answer;
+
+    if (isCorrect) {
+      const winnerIdx = isSteal ? stealQueue[0] : buzzedTeamIdx;
+      // Update score and grid
+      setTeamsState(prev => prev.map((t, i) =>
+        i === winnerIdx ? { ...t, score: t.score + 1 } : t
+      ));
+      setHexGrid(prev => {
+        const next = prev.map((h, i) =>
+          i === activeHexIdx ? { ...h, owner: winnerIdx } : h
+        );
+        return next;
+      });
+      setResultInfo({ type: 'correct', teamName: teams[winnerIdx]?.name, correctAnswer: currentQuestion?.answer });
+      setPhase('result');
+      // After result: let winner pick next path
+      setTimeout(() => {
+        setResultInfo(null);
+        setHexGrid(prev => {
+          const unclaimed = prev.filter(h => h.owner === null).length;
+          if (unclaimed === 0) {
+            setPhase('gameover');
+            return prev;
+          }
+          const nextSelectable = getSelectableForTeam(prev, winnerIdx, false);
+          setSelectableIdxs(nextSelectable);
+          setControlTeamIdx(winnerIdx);
+          setPhase('path-select');
+          return prev;
+        });
+      }, 2200);
+    } else {
+      // Wrong answer
+      setResultInfo({ type: 'wrong', correctAnswer: currentQuestion?.answer });
+      setPhase('result');
+      setTimeout(() => {
+        setResultInfo(null);
+        // Try steal: give remaining teams a chance
+        const remaining = isSteal ? stealQueue.slice(1) : stealQueue;
+        if (remaining.length > 0) {
+          setIsSteal(true);
+          setStealQueue(remaining);
+          setBuzzedTeamIdx(null);
+          setSelectedAnswer(null);
+          setResultInfo(null);
+          setPhase('steal');
+          setAnswerRunning(true);
+        } else {
+          // No one answered correctly — skip hex
+          setHexGrid(prev => {
+            const next = prev.map((h, i) => i === activeHexIdx ? { ...h, owner: -1 } : h);
+            advanceRound(next, controlTeamIdx, round);
+            return next;
+          });
+        }
+      }, 1800);
+    }
+  }, [currentQuestion, isSteal, stealQueue, buzzedTeamIdx, activeHexIdx, teams, controlTeamIdx, round]); // eslint-disable-line
+
+  // Answer timer expired
+  const onAnswerTimeout = useCallback(() => {
+    setAnswerRunning(false);
+    setResultInfo({ type: 'timeout', correctAnswer: currentQuestion?.answer });
+    setPhase('result');
+    setTimeout(() => {
+      setResultInfo(null);
+      const remaining = isSteal ? stealQueue.slice(1) : stealQueue;
+      if (remaining.length > 0) {
+        setIsSteal(true);
+        setStealQueue(remaining);
+        setBuzzedTeamIdx(null);
+        setSelectedAnswer(null);
+        setPhase('steal');
+        setAnswerRunning(true);
+      } else {
+        setHexGrid(prev => {
+          const next = prev.map((h, i) => i === activeHexIdx ? { ...h, owner: -1 } : h);
+          advanceRound(next, controlTeamIdx, round);
+          return next;
+        });
+      }
+    }, 1800);
+  }, [currentQuestion, isSteal, stealQueue, activeHexIdx, controlTeamIdx, round]); // eslint-disable-line
+
+  // Control team selects next hex
+  const onSelectHex = useCallback((hexIdx) => {
+    setActiveHexIdx(hexIdx);
+    setSelectableIdxs([]);
+    setPhase('pre-question');
+    setRound(r => r + 1);
+    preQTimeout.current = setTimeout(() => {
+      startBuzzer(hexGrid, hexIdx);
+    }, PRE_Q_DELAY);
+  }, [hexGrid, startBuzzer]); // eslint-disable-line
+
+  // Helper: advance to next round after skipped hex
+  function advanceRound(grid, ctrlIdx, currentRound) {
+    const unclaimed = grid.filter(h => h.owner === null).length;
+    if (unclaimed === 0) {
+      setPhase('gameover');
       return;
     }
-    setGrid(newGrid);
-    setResultMessage({ isCorrect, correctAnswer: currentQuestion.answer });
-    const next = currentTurn === 'A' ? 'B' : 'A';
-    setTimeout(() => {
-      setResultMessage(null);
-      setCurrentTurn(next);
-      setGamePhase('selecting');
-      setSelectedCell(null);
-      setCurrentQuestion(null);
-      setSelectedAnswer(null);
-    }, 2000);
-  };
+    if (ctrlIdx !== null) {
+      const nextSel = getSelectableForTeam(grid, ctrlIdx, false);
+      setSelectableIdxs(nextSel);
+      setControlTeamIdx(ctrlIdx);
+      setPhase('path-select');
+    } else {
+      // First round skipped — let all teams see next hex
+      setSelectableIdxs(grid.filter(h => h.owner === null).map(h => h.index));
+      setPhase('path-select');
+    }
+    setRound(currentRound + 1);
+  }
 
-  const timeUp = () => {
-    if (gamePhase !== 'answering') return;
-    setTimerRunning(false);
-    setResultMessage({ isCorrect: false, timeUp: true, correctAnswer: currentQuestion?.answer });
-    const next = currentTurn === 'A' ? 'B' : 'A';
-    setTimeout(() => {
-      setResultMessage(null);
-      setCurrentTurn(next);
-      setGamePhase('selecting');
-      setSelectedCell(null);
-      setCurrentQuestion(null);
-      setSelectedAnswer(null);
-    }, 2000);
-  };
-
-  const reset = () => { setScreen('setup'); setWinner(null); };
+  // Cleanup
+  useEffect(() => () => clearTimeout(preQTimeout.current), []);
 
   return {
-    screen, gridSize, setGridSize, grid, gridN,
-    currentTurn, gamePhase, selectedCell, currentQuestion,
-    selectedAnswer, timerRunning, resultMessage, winner,
-    startGame, selectCell, submitAnswer, timeUp, reset,
+    hexGrid, phase, activeHexIdx, controlTeamIdx, buzzedTeamIdx,
+    currentQuestion, selectedAnswer, resultInfo,
+    buzzerRunning, answerRunning, teamsState, selectableIdxs,
+    isSteal, stealQueue,
+    onBuzz, onBuzzerTimeout, onAnswer, onAnswerTimeout, onSelectHex,
   };
 }
 
-// ─── Component ────────────────────────────────────────────────────────────────
+// ── Game Screen ────────────────────────────────────────────────────────────────
+function GameScreen({ teams, onBack }) {
+  const g = useHuroofGame(teams);
 
-export default function HuroofPage() {
-  const navigate = useNavigate();
-  const [mode, setMode] = useState(null); // null | 'local' | 'room'
+  const activeTeam   = g.buzzedTeamIdx !== null ? teams[g.buzzedTeamIdx] : null;
+  const stealingTeam = g.isSteal && g.stealQueue.length > 0 ? teams[g.stealQueue[0]] : null;
+  const ctrlTeam     = g.controlTeamIdx !== null ? g.teamsState[g.controlTeamIdx] : null;
 
-  // Room state
-  const [roomScreen, setRoomScreen] = useState('setup');
-  const [playerName, setPlayerName] = useState('');
-  const [selectedTeam, setSelectedTeam] = useState('A');
-  const [gridSize, setGridSize] = useState('medium');
-  const [roomCode, setRoomCode] = useState('');
-  const [joinCode, setJoinCode] = useState('');
-  const [isHost, setIsHost] = useState(false);
-  const [gameState, setGameState] = useState(null);
-  const [cellSelected, setCellSelected] = useState(null);
-  const [answerResult, setAnswerResult] = useState(null);
-  const [gameOver, setGameOver] = useState(null);
-  const [myId, setMyId] = useState(null);
-  const [error, setError] = useState('');
-  const [timerRunning, setTimerRunning] = useState(false);
-  const [selectedAnswer, setSelectedAnswer] = useState(null);
-  const [resultMessage, setResultMessage] = useState(null);
+  // Count owned hexes per team
+  const ownedCount = teams.map((_, i) =>
+    g.hexGrid.filter(h => h.owner === i).length
+  );
 
-  const local = useLocalGame();
-
-  // Room socket setup
-  useEffect(() => {
-    if (mode !== 'room') return;
-    socket.connect();
-    setMyId(socket.id);
-    socket.on('connect', () => setMyId(socket.id));
-    socket.on('huroof:created', ({ roomCode, isHost, state }) => { setRoomCode(roomCode); setIsHost(isHost); setGameState(state); setRoomScreen('lobby'); });
-    socket.on('huroof:joined', ({ roomCode, isHost, state }) => { setRoomCode(roomCode); setIsHost(isHost); setGameState(state); setRoomScreen('lobby'); });
-    socket.on('huroof:player_joined', ({ state }) => setGameState(state));
-    socket.on('huroof:player_left', ({ state }) => setGameState(state));
-    socket.on('huroof:game_started', (data) => { setGameState(s => ({ ...s, ...data, state: 'selecting' })); setRoomScreen('game'); setGameOver(null); setResultMessage(null); });
-    socket.on('huroof:cell_selected', (data) => { setCellSelected(data); setSelectedAnswer(null); setResultMessage(null); setTimerRunning(true); setGameState(s => ({ ...s, state: 'answering', selectedCell: data.cellIndex })); });
-    socket.on('huroof:answer_result', (data) => { setTimerRunning(false); setResultMessage({ isCorrect: data.isCorrect, correctAnswer: data.correctAnswer }); setGameState(s => ({ ...s, grid: data.grid, currentTurn: data.nextTurn, state: 'selecting', selectedCell: null })); setCellSelected(null); setSelectedAnswer(null); setTimeout(() => setResultMessage(null), 2500); });
-    socket.on('huroof:time_up', (data) => { setTimerRunning(false); setResultMessage({ isCorrect: false, timeUp: true, correctAnswer: data.correctAnswer }); setGameState(s => ({ ...s, grid: data.grid, currentTurn: data.nextTurn, state: 'selecting', selectedCell: null })); setCellSelected(null); setSelectedAnswer(null); setTimeout(() => setResultMessage(null), 2500); });
-    socket.on('huroof:game_over', (data) => { setTimerRunning(false); setGameState(s => ({ ...s, grid: data.grid, state: 'results' })); setGameOver(data); setRoomScreen('gameover'); });
-    socket.on('error', ({ message }) => setError(message));
-    return () => {
-      ['connect','huroof:created','huroof:joined','huroof:player_joined','huroof:player_left',
-       'huroof:game_started','huroof:cell_selected','huroof:answer_result','huroof:time_up','huroof:game_over','error']
-        .forEach(e => socket.off(e));
-      socket.disconnect();
-    };
-  }, [mode]);
-
-  // ── Mode selection ────────────────────────────────────────────────────────
-  if (!mode) {
-    return (
-      <div className="page huroof-setup">
-        <button className="back-btn" onClick={() => navigate('/')}>← العودة</button>
-        <div className="setup-card card pop-in">
-          <div className="setup-icon">🔤</div>
-          <h1>حروف</h1>
-          <p className="setup-desc">فريقان يتنافسان على ربط مسار عبر شبكة الحروف</p>
-          <div className="mode-buttons">
-            <button className="btn-green mode-btn" onClick={() => setMode('local')}>
-              🏠 لعب محلي
-              <small>نفس الجهاز — بدون إنترنت</small>
-            </button>
-            <button className="btn-secondary mode-btn" onClick={() => setMode('room')}>
-              🌐 غرفة أونلاين
-              <small>أجهزة منفصلة — يتطلب خادماً</small>
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // ── LOCAL MODE ────────────────────────────────────────────────────────────
-  if (mode === 'local') {
-    if (local.screen === 'setup') {
-      return (
-        <div className="page huroof-setup">
-          <button className="back-btn" onClick={() => setMode(null)}>← العودة</button>
-          <div className="setup-card card pop-in">
-            <div className="setup-icon">🔤</div>
-            <h1>حروف — محلي</h1>
-            <p className="setup-desc">فريقان على نفس الجهاز</p>
-            <div className="grid-size-select">
-              <label>حجم الشبكة:</label>
-              <div className="size-btns">
-                {['small', 'medium', 'large'].map(s => (
-                  <button key={s} className={`size-btn ${local.gridSize === s ? 'selected' : ''}`} onClick={() => local.setGridSize(s)}>
-                    {s === 'small' ? '4×4' : s === 'medium' ? '5×5' : '6×6'}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <button className="btn-green start-game-btn" onClick={local.startGame}>ابدأ اللعبة 🔤</button>
-          </div>
-        </div>
-      );
-    }
-
-    if (local.screen === 'game') {
-      const isAnswering = local.gamePhase === 'answering';
-      const n = local.gridN;
-      return (
-        <div className="huroof-game-page">
-          <div className="huroof-header">
-            <div className={`turn-indicator ${local.currentTurn === 'A' ? 'turn-a' : 'turn-b'}`}>
-              {local.currentTurn === 'A' ? '🟢' : '🟠'}
-              {`دور ${local.currentTurn === 'A' ? 'الأخضر' : 'البرتقالي'}`}
-            </div>
-            {isAnswering && <Timer duration={ANSWER_TIME} running={local.timerRunning} onEnd={local.timeUp} />}
-          </div>
-
-          {local.resultMessage && (
-            <div className={`result-flash pop-in ${local.resultMessage.isCorrect ? 'correct' : 'wrong'}`}>
-              {local.resultMessage.timeUp ? '⏰ انتهى الوقت!' : local.resultMessage.isCorrect ? '✅ إجابة صحيحة!' : `❌ خطأ — الصواب: ${local.resultMessage.correctAnswer}`}
-            </div>
-          )}
-
-          <div className="grid-container">
-            <div className="border-label top-label">🟢 الفريق الأخضر</div>
-            <div className="grid-row-wrap">
-              <div className="border-label left-label">🟠<br/>البرتقالي</div>
-              <div className="huroof-grid" style={{ gridTemplateColumns: `repeat(${n}, 1fr)` }}>
-                {local.grid.map((cell, i) => (
-                  <button
-                    key={i}
-                    className={`grid-cell ${cell.owner === 'A' ? 'owned-a' : cell.owner === 'B' ? 'owned-b' : ''} ${local.selectedCell === i ? 'selected-cell' : ''} ${!isAnswering && !cell.owner ? 'clickable' : ''}`}
-                    onClick={() => local.selectCell(i)}
-                    disabled={isAnswering || !!cell.owner}
-                  >
-                    {cell.letter}
-                  </button>
-                ))}
-              </div>
-              <div className="border-label right-label">🟠<br/>البرتقالي</div>
-            </div>
-            <div className="border-label bottom-label">🟢 الفريق الأخضر</div>
-          </div>
-
-          {isAnswering && local.currentQuestion && (
-            <div className="question-panel card pop-in">
-              <div className="q-letter-badge">{local.grid[local.selectedCell]?.letter}</div>
-              <p className="question-text">{local.currentQuestion.text}</p>
-              <div className="options-grid">
-                {local.currentQuestion.options.map((opt, i) => (
-                  <button
-                    key={i}
-                    className={`option-btn ${local.selectedAnswer === i ? 'answered' : ''}`}
-                    onClick={() => local.submitAnswer(i)}
-                    disabled={local.selectedAnswer !== null}
-                  >
-                    {opt}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <div className="teams-legend">
-            <div className="legend-item legend-a">🟢 الفريق الأخضر: الأعلى ← الأسفل</div>
-            <div className="legend-item legend-b">🟠 الفريق البرتقالي: اليمين ← اليسار</div>
-          </div>
-        </div>
-      );
-    }
-
-    if (local.screen === 'gameover') {
-      const n = local.gridN;
-      return (
-        <div className="page asbiq-gameover">
-          <div className="gameover-hero pop-in">
-            <div className="gameover-trophy">🏆</div>
-            <h1 className={local.winner === 'A' ? 'winner-a' : 'winner-b'}>
-              فاز {local.winner === 'A' ? '🟢 الفريق الأخضر' : '🟠 الفريق البرتقالي'}!
-            </h1>
-          </div>
-          <div className="final-grid-wrap">
-            <div className="huroof-grid final-grid" style={{ gridTemplateColumns: `repeat(${n}, 1fr)` }}>
-              {local.grid.map((cell, i) => (
-                <div key={i} className={`grid-cell ${cell.owner === 'A' ? 'owned-a' : cell.owner === 'B' ? 'owned-b' : ''}`}>{cell.letter}</div>
-              ))}
-            </div>
-          </div>
-          <div className="gameover-actions">
-            <button className="btn-secondary" onClick={local.reset}>العب مجدداً</button>
-            <button className="btn-primary" onClick={() => navigate('/')}>الرئيسية</button>
-          </div>
-        </div>
-      );
-    }
-  }
-
-  // ── ROOM MODE ─────────────────────────────────────────────────────────────
-  const myTeam = gameState?.players?.[myId]?.team;
-  const isMyTurn = myTeam === gameState?.currentTurn;
-  const n = gameState?.gridN || 5;
-
-  if (roomScreen === 'setup') {
-    return (
-      <div className="page huroof-setup">
-        <button className="back-btn" onClick={() => { setMode(null); setRoomScreen('setup'); }}>← العودة</button>
-        <div className="setup-card card pop-in">
-          <div className="setup-icon">🔤</div>
-          <h1>حروف — غرفة</h1>
-          <input className="input-field" placeholder="اسمك" value={playerName} onChange={e => setPlayerName(e.target.value)} maxLength={20} />
-          <div className="team-select">
-            <label>اختر فريقك:</label>
-            <div className="team-btns">
-              <button className={`team-btn team-a ${selectedTeam === 'A' ? 'selected' : ''}`} onClick={() => setSelectedTeam('A')}>🟢 الأخضر</button>
-              <button className={`team-btn team-b ${selectedTeam === 'B' ? 'selected' : ''}`} onClick={() => setSelectedTeam('B')}>🟠 البرتقالي</button>
-            </div>
-          </div>
-          <div className="grid-size-select">
-            <label>حجم الشبكة:</label>
-            <div className="size-btns">
-              {['small', 'medium', 'large'].map(s => (
-                <button key={s} className={`size-btn ${gridSize === s ? 'selected' : ''}`} onClick={() => setGridSize(s)}>
-                  {s === 'small' ? '4×4' : s === 'medium' ? '5×5' : '6×6'}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="setup-actions">
-            <button className="btn-green" onClick={() => { if (!playerName.trim()) return setError('أدخل اسمك'); setError(''); socket.emit('huroof:create', { playerName: playerName.trim(), team: selectedTeam, gridSize }); }}>إنشاء غرفة</button>
-            <span className="divider">أو</span>
-            <div className="join-row">
-              <input className="input-field join-input" placeholder="رمز الغرفة" value={joinCode} onChange={e => setJoinCode(e.target.value.toUpperCase())} maxLength={6} style={{ textAlign: 'center', letterSpacing: 4, fontSize: '1.2rem' }} />
-              <button className="btn-secondary" onClick={() => { if (!playerName.trim()) return setError('أدخل اسمك'); if (!joinCode.trim()) return setError('أدخل رمز الغرفة'); setError(''); socket.emit('huroof:join', { roomCode: joinCode.trim(), playerName: playerName.trim(), team: selectedTeam }); }}>انضم</button>
-            </div>
-          </div>
-          {error && <div className="error-msg shake">{error}</div>}
-        </div>
-      </div>
-    );
-  }
-
-  if (roomScreen === 'lobby') {
-    const teamA = Object.values(gameState?.players || {}).filter(p => p.team === 'A');
-    const teamB = Object.values(gameState?.players || {}).filter(p => p.team === 'B');
-    return (
-      <div className="page huroof-lobby">
-        <div className="lobby-card card">
-          <h2>غرفة الانتظار</h2>
-          <div className="room-code-display"><span>رمز الغرفة:</span><strong className="room-code">{roomCode}</strong></div>
-          <div className="teams-preview">
-            <div className="team-preview team-a-preview">
-              <h4>🟢 الفريق الأخضر ({teamA.length})</h4>
-              {teamA.map(p => <div key={p.name} className="player-item">{p.name}</div>)}
-              <small>يربط من الأعلى للأسفل</small>
-            </div>
-            <div className="team-preview team-b-preview">
-              <h4>🟠 الفريق البرتقالي ({teamB.length})</h4>
-              {teamB.map(p => <div key={p.name} className="player-item">{p.name}</div>)}
-              <small>يربط من اليمين لليسار</small>
-            </div>
-          </div>
-          {isHost
-            ? <button className="btn-green start-btn" onClick={() => socket.emit('huroof:start')}>ابدأ اللعبة 🔤</button>
-            : <p className="waiting-msg pulse">انتظار المضيف لبدء اللعبة...</p>}
-        </div>
-      </div>
-    );
-  }
-
-  if (roomScreen === 'game') {
-    const grid = gameState?.grid || [];
-    const currentTurn = gameState?.currentTurn;
-    const isAnswering = gameState?.state === 'answering';
-    return (
-      <div className="huroof-game-page">
-        <div className="huroof-header">
-          <div className={`turn-indicator ${currentTurn === 'A' ? 'turn-a' : 'turn-b'}`}>
-            {currentTurn === 'A' ? '🟢' : '🟠'}
-            {isMyTurn ? 'دورك!' : `دور ${currentTurn === 'A' ? 'الأخضر' : 'البرتقالي'}`}
-          </div>
-          {isAnswering && <Timer duration={ANSWER_TIME} running={timerRunning} />}
-        </div>
-        {resultMessage && (
-          <div className={`result-flash pop-in ${resultMessage.isCorrect ? 'correct' : 'wrong'}`}>
-            {resultMessage.timeUp ? '⏰ انتهى الوقت!' : resultMessage.isCorrect ? '✅ إجابة صحيحة!' : `❌ خطأ — الصواب: ${resultMessage.correctAnswer}`}
-          </div>
-        )}
-        <div className="grid-container">
-          <div className="border-label top-label">🟢 الفريق الأخضر</div>
-          <div className="grid-row-wrap">
-            <div className="border-label left-label">🟠<br/>البرتقالي</div>
-            <div className="huroof-grid" style={{ gridTemplateColumns: `repeat(${n}, 1fr)` }}>
-              {grid.map((cell, i) => (
-                <button key={i}
-                  className={`grid-cell ${cell.owner === 'A' ? 'owned-a' : cell.owner === 'B' ? 'owned-b' : ''} ${gameState?.selectedCell === i ? 'selected-cell' : ''} ${isMyTurn && !isAnswering && !cell.owner ? 'clickable' : ''}`}
-                  onClick={() => { if (!gameState || gameState.state !== 'selecting') return; if (myTeam !== gameState.currentTurn) return; if (!cell || cell.owner !== null) return; socket.emit('huroof:select_cell', { cellIndex: i }); }}
-                  disabled={isAnswering || !isMyTurn || !!cell.owner}
-                >
-                  {cell.letter}
-                </button>
-              ))}
-            </div>
-            <div className="border-label right-label">🟠<br/>البرتقالي</div>
-          </div>
-          <div className="border-label bottom-label">🟢 الفريق الأخضر</div>
-        </div>
-        {isAnswering && cellSelected && (
-          <div className="question-panel card pop-in">
-            <div className="q-letter-badge">{cellSelected.letter}</div>
-            <p className="question-text">{cellSelected.question?.text}</p>
-            <div className="options-grid">
-              {cellSelected.question?.options?.map((opt, i) => (
-                <button key={i} className={`option-btn ${selectedAnswer === i ? 'answered' : ''}`} onClick={() => { setSelectedAnswer(i); socket.emit('huroof:answer', { answerIndex: i }); }} disabled={selectedAnswer !== null || !isMyTurn}>{opt}</button>
-              ))}
-            </div>
-            {!isMyTurn && <p className="waiting-answer pulse">ينتظر إجابة الفريق الآخر...</p>}
-          </div>
-        )}
-        <div className="teams-legend">
-          <div className="legend-item legend-a">🟢 الفريق الأخضر: الأعلى ← الأسفل</div>
-          <div className="legend-item legend-b">🟠 الفريق البرتقالي: اليمين ← اليسار</div>
-        </div>
-      </div>
-    );
-  }
-
-  if (roomScreen === 'gameover') {
-    const winnerTeam = gameOver?.winner;
-    const isMyTeamWinner = myTeam === winnerTeam;
+  if (g.phase === 'gameover') {
+    const maxScore = Math.max(...g.teamsState.map(t => t.score));
+    const winners  = g.teamsState.filter(t => t.score === maxScore);
     return (
       <div className="page asbiq-gameover">
         <div className="gameover-hero pop-in">
-          <div className="gameover-trophy">{isMyTeamWinner ? '🏆' : '🎮'}</div>
-          <h1 className={winnerTeam === 'A' ? 'winner-a' : 'winner-b'}>
-            فاز {winnerTeam === 'A' ? '🟢 الفريق الأخضر' : '🟠 الفريق البرتقالي'}!
+          <div className="gameover-trophy">🏆</div>
+          <h1 className="winner-text" style={{ color: winners[0]?.color }}>
+            {winners.length === 1
+              ? `فاز ${winners[0].name}!`
+              : `تعادل: ${winners.map(w => w.name).join(' & ')}!`}
           </h1>
-          {isMyTeamWinner && <p className="congrats-msg">🎉 مبروك لفريقك!</p>}
         </div>
-        {gameState?.grid && (
-          <div className="final-grid-wrap">
-            <div className="huroof-grid final-grid" style={{ gridTemplateColumns: `repeat(${n}, 1fr)` }}>
-              {gameState.grid.map((cell, i) => (
-                <div key={i} className={`grid-cell ${cell.owner === 'A' ? 'owned-a' : cell.owner === 'B' ? 'owned-b' : ''}`}>{cell.letter}</div>
-              ))}
+
+        {/* Final grid */}
+        <div className="final-grid-wrap">
+          <HexGrid
+            hexGrid={g.hexGrid}
+            teams={g.teamsState}
+            activeHexIdx={-1}
+            selectableIdxs={[]}
+            onSelectHex={() => {}}
+            phase="gameover"
+          />
+        </div>
+
+        {/* Scores */}
+        <div className="score-bar" style={{ marginTop: 16 }}>
+          {g.teamsState.map((t, i) => (
+            <div key={i} className="score-item"
+              style={{ '--sc': t.color, '--sc-dim': makeRgba(t.color, 0.15), '--sc-border': makeRgba(t.color, 0.35) }}>
+              <span className="score-dot" style={{ background: t.color }} />
+              <span>{t.name}</span>
+              <span className="score-pts">{t.score} خلية</span>
             </div>
-          </div>
-        )}
-        <button className="btn-primary" onClick={() => navigate('/')}>العودة للرئيسية</button>
+          ))}
+        </div>
+
+        <div className="gameover-actions">
+          <button className="btn-secondary" onClick={onBack}>العب مجدداً</button>
+        </div>
       </div>
     );
   }
 
-  return null;
+  return (
+    <div className="huroof-game-page">
+      {/* Header */}
+      <div className="huroof-header">
+        <button className="back-btn-inline" onClick={onBack}>← العودة</button>
+        <div className="huroof-phase-label">
+          {g.phase === 'pre-question'  && '🔍 جاهزوا...'}
+          {g.phase === 'buzzing'       && '⚡ اضغط الجرس!'}
+          {g.phase === 'answering'     && (activeTeam ? `🎯 ${activeTeam.name} يجيب` : '')}
+          {g.phase === 'steal'         && (stealingTeam ? `⚡ سرقة — ${stealingTeam.name}` : '')}
+          {g.phase === 'result'        && '📋 النتيجة'}
+          {g.phase === 'path-select'   && (ctrlTeam ? `🗺 ${ctrlTeam.name} يختار الخلية التالية` : '')}
+        </div>
+      </div>
+
+      {/* Scores */}
+      <ScoreBar teams={g.teamsState} controlTeamIdx={g.controlTeamIdx} />
+
+      {/* Result flash (shown above grid) */}
+      {g.resultInfo && <ResultFlash result={g.resultInfo} />}
+
+      {/* Hex Grid */}
+      <HexGrid
+        hexGrid={g.hexGrid}
+        teams={g.teamsState}
+        activeHexIdx={g.activeHexIdx}
+        selectableIdxs={g.selectableIdxs}
+        onSelectHex={g.onSelectHex}
+        phase={g.phase}
+      />
+
+      {/* Legend */}
+      <div className="teams-legend">
+        {teams.map((t, i) => (
+          <div key={i} className="legend-item"
+            style={{ color: t.color, borderColor: makeRgba(t.color, 0.4), background: makeRgba(t.color, 0.08) }}>
+            <span className="score-dot" style={{ background: t.color }} />
+            {t.name}: {ownedCount[i]} خلية
+          </div>
+        ))}
+      </div>
+
+      {/* Overlays */}
+      {(g.phase === 'buzzing') && (
+        <BuzzerPanel
+          teams={teams}
+          buzzedTeamIdx={g.buzzedTeamIdx}
+          onBuzz={g.onBuzz}
+          timerRunning={g.buzzerRunning}
+          onTimerEnd={g.onBuzzerTimeout}
+        />
+      )}
+
+      {(g.phase === 'answering') && (
+        <AnswerPanel
+          question={g.currentQuestion}
+          letter={g.hexGrid[g.activeHexIdx]?.letter}
+          activeTeam={activeTeam}
+          isSteal={false}
+          stealTeam={null}
+          selectedAnswer={g.selectedAnswer}
+          onAnswer={g.onAnswer}
+          timerRunning={g.answerRunning}
+          onTimerEnd={g.onAnswerTimeout}
+        />
+      )}
+
+      {(g.phase === 'steal') && stealingTeam && (
+        <AnswerPanel
+          question={g.currentQuestion}
+          letter={g.hexGrid[g.activeHexIdx]?.letter}
+          activeTeam={activeTeam}
+          isSteal={true}
+          stealTeam={stealingTeam}
+          selectedAnswer={g.selectedAnswer}
+          onAnswer={g.onAnswer}
+          timerRunning={g.answerRunning}
+          onTimerEnd={g.onAnswerTimeout}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Root Component ─────────────────────────────────────────────────────────────
+export default function HuroofPage() {
+  const navigate = useNavigate();
+  const [teams, setTeams] = useState(null);
+
+  // Apply saved theme on mount
+  useEffect(() => {
+    applyThemeCSS(getSavedTheme());
+  }, []);
+
+  if (!teams) {
+    return (
+      <SetupScreen
+        onStart={(t) => setTeams(t)}
+        navigate={navigate}
+      />
+    );
+  }
+
+  return (
+    <GameScreen
+      teams={teams}
+      onBack={() => setTeams(null)}
+    />
+  );
 }
