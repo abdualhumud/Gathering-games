@@ -8,10 +8,10 @@ import HUROOF_THEMES, {
 import './HuroofPage.css';
 
 // ── Constants ──────────────────────────────────────────────────────────────────
-const BUZZER_TIME = 8;   // seconds before buzzer window closes (no winner)
-const ANSWER_TIME = 30;  // seconds to answer after buzzing in
-const STEAL_TIME  = 15;  // seconds per steal attempt
-const PRE_Q_DELAY = 1800; // ms to show active hex before buzzer opens
+const BUZZER_TIME = 8;
+const ANSWER_TIME = 30;
+const STEAL_TIME  = 15;
+const PRE_Q_MS    = 1600;
 
 const ARABIC_LETTERS = [
   'ا','ب','ت','ث','ج','ح','خ','د','ذ','ر',
@@ -19,102 +19,72 @@ const ARABIC_LETTERS = [
   'ق','ك','ل','م','ن','ه','و','ي',
 ];
 
-// 19-hex honeycomb: 5 rows [3, 4, 5, 4, 3]
-// Row 0: indices 0-2   Row 1: 3-6   Row 2: 7-11   Row 3: 12-15   Row 4: 16-18
-const HEX_ROWS    = [3, 4, 5, 4, 3];
-const TOTAL_HEXES = 19;
-const CENTER_IDX  = 9; // row 2, col 2
+// ── Flat-top honeycomb grid: 5 rows × 5 cols = 25 hexes ──────────────────────
+// Visual arrangement (odd rows shifted right by W/2):
+//  Row 0 (even): [0]  [1]  [2]  [3]  [4]
+//  Row 1 (odd) :   [5]  [6]  [7]  [8]  [9]
+//  Row 2 (even): [10] [11] [12] [13] [14]   ← center = 12
+//  Row 3 (odd) :   [15] [16] [17] [18] [19]
+//  Row 4 (even): [20] [21] [22] [23] [24]
 
-// Pre-computed adjacency (pointy-top hexes, same-row flat edges + inter-row)
-const HEX_ADJ = {
-  0:  [1, 3, 4],
-  1:  [0, 2, 4, 5],
-  2:  [1, 5, 6],
-  3:  [0, 4, 7, 8],
-  4:  [0, 1, 3, 5, 8, 9],
-  5:  [1, 2, 4, 6, 9, 10],
-  6:  [2, 5, 10, 11],
-  7:  [3, 8, 12],
-  8:  [3, 4, 7, 9, 12, 13],
-  9:  [4, 5, 8, 10, 13, 14],  // CENTER
-  10: [5, 6, 9, 11, 14, 15],
-  11: [6, 10, 15],
-  12: [7, 8, 13, 16],
-  13: [8, 9, 12, 14, 16, 17],
-  14: [9, 10, 13, 15, 17, 18],
-  15: [10, 11, 14, 18],
-  16: [12, 13, 17],
-  17: [13, 14, 16, 18],
-  18: [14, 15, 17],
-};
+const HEX_ROWS    = [5, 5, 5, 5, 5];
+const TOTAL_HEXES = 25;
+const CENTER_IDX  = 12; // row 2, col 2
 
-const DEFAULT_TEAM_COLORS = ['#22c55e','#f97316','#3b82f6','#a855f7','#ef4444','#eab308'];
-const DEFAULT_TEAM_NAMES  = [
+const DEFAULT_COLORS = ['#22c55e','#f97316','#3b82f6','#a855f7','#ef4444','#eab308'];
+const DEFAULT_NAMES  = [
   'الفريق الأخضر','الفريق البرتقالي','الفريق الأزرق',
   'الفريق البنفسجي','الفريق الأحمر','الفريق الذهبي',
 ];
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
-function buildHexGrid() {
+function rgba(hex, a) {
+  const r = parseInt(hex.slice(1,3),16);
+  const g = parseInt(hex.slice(3,5),16);
+  const b = parseInt(hex.slice(5,7),16);
+  return `rgba(${r},${g},${b},${a})`;
+}
+
+function buildGrid() {
   const pool = [...ARABIC_LETTERS].sort(() => Math.random() - 0.5);
   return Array.from({ length: TOTAL_HEXES }, (_, i) => ({
     index: i,
     letter: pool[i % pool.length],
-    owner: null, // null | teamIndex
+    owner: null,  // null | teamIndex | -1 (skipped)
   }));
 }
 
-function getOwnedByTeam(hexGrid, teamIdx) {
-  return hexGrid.filter(h => h.owner === teamIdx).map(h => h.index);
-}
-
-function getSelectableForTeam(hexGrid, teamIdx, isFirstRound) {
+/** Winner picks ANY unowned hex on the board */
+function getSelectable(grid, isFirstRound) {
   if (isFirstRound) return [CENTER_IDX];
-  const owned = new Set(getOwnedByTeam(hexGrid, teamIdx));
-  if (owned.size === 0) {
-    // No hexes owned yet — pick any unowned hex adjacent to center (or any unowned)
-    return hexGrid.filter(h => h.owner === null).map(h => h.index);
-  }
-  const adj = new Set();
-  for (const idx of owned) {
-    for (const n of HEX_ADJ[idx] ?? []) {
-      if (hexGrid[n].owner === null) adj.add(n);
-    }
-  }
-  if (adj.size > 0) return [...adj];
-  // Fallback: any unowned hex
-  return hexGrid.filter(h => h.owner === null).map(h => h.index);
+  return grid.filter(h => h.owner === null).map(h => h.index);
 }
 
-function makeRgba(hex, alpha) {
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
-  return `rgba(${r},${g},${b},${alpha})`;
+function loadQ(letter) {
+  const qs = getQuestionsByLetter ? getQuestionsByLetter(letter) : [];
+  return qs.length > 0
+    ? qs[Math.floor(Math.random() * qs.length)]
+    : (getRandomQuestion ? getRandomQuestion() : null);
 }
 
-// ── Setup sub-component ────────────────────────────────────────────────────────
+// ── Setup Screen ───────────────────────────────────────────────────────────────
 function SetupScreen({ onStart, navigate }) {
-  const [numTeams, setNumTeams]   = useState(2);
-  const [teamNames, setTeamNames] = useState([...DEFAULT_TEAM_NAMES]);
-  const [teamColors, setTeamColors] = useState([...DEFAULT_TEAM_COLORS]);
-  const [themeId, setThemeId]     = useState(() => getSavedTheme().id || 'classic');
-  const [customA, setCustomA]     = useState('#22c55e');
-  const [customB, setCustomB]     = useState('#f97316');
+  const [numTeams,   setNumTeams]   = useState(2);
+  const [names,      setNames]      = useState([...DEFAULT_NAMES]);
+  const [colors,     setColors]     = useState([...DEFAULT_COLORS]);
+  const [themeId,    setThemeId]    = useState(() => getSavedTheme()?.id || 'classic');
+  const [customA,    setCustomA]    = useState('#22c55e');
+  const [customB,    setCustomB]    = useState('#f97316');
 
   useEffect(() => {
-    if (themeId !== 'custom') {
-      const t = HUROOF_THEMES[themeId];
-      if (t) applyThemeCSS(t);
-    } else {
-      applyThemeCSS(buildCustomTheme(customA, customB));
-    }
+    const t = themeId === 'custom' ? buildCustomTheme(customA, customB) : HUROOF_THEMES[themeId];
+    if (t) applyThemeCSS(t);
   }, [themeId, customA, customB]);
 
-  const handleStart = () => {
+  const start = () => {
     const teams = Array.from({ length: numTeams }, (_, i) => ({
-      name:  teamNames[i] || DEFAULT_TEAM_NAMES[i],
-      color: teamColors[i] || DEFAULT_TEAM_COLORS[i],
+      name: names[i] || DEFAULT_NAMES[i],
+      color: colors[i] || DEFAULT_COLORS[i],
       score: 0,
     }));
     onStart(teams);
@@ -127,86 +97,66 @@ function SetupScreen({ onStart, navigate }) {
         <div className="setup-icon">⬡</div>
         <h1>لعبة الحروف</h1>
         <p className="setup-desc">
-          تنافس على احتلال خلايا شبكة الحروف — الفريق الأسرع في الضغط يجيب أولاً
+          شبكة حروف سداسية — الفريق الأسرع يضغط الجرس ويجيب ويختار الحرف التالي من أي مكان في الشبكة
         </p>
 
-        {/* Number of teams */}
+        {/* Team count */}
         <div className="grid-size-select">
           <label>عدد الفرق:</label>
           <div className="size-btns">
             {[2, 3, 4].map(n => (
-              <button
-                key={n}
-                className={`size-btn ${numTeams === n ? 'selected' : ''}`}
-                onClick={() => setNumTeams(n)}
-              >
-                {n} فرق
+              <button key={n} className={`size-btn ${numTeams === n ? 'selected' : ''}`}
+                onClick={() => setNumTeams(n)}>{n} فرق
               </button>
             ))}
           </div>
         </div>
 
-        {/* Team names + colors */}
+        {/* Team rows */}
         <div className="huroof-teams-config">
           {Array.from({ length: numTeams }, (_, i) => (
             <div key={i} className="huroof-team-row">
-              <input
-                type="color"
-                value={teamColors[i]}
-                onChange={e => {
-                  const next = [...teamColors]; next[i] = e.target.value; setTeamColors(next);
-                }}
-                className="team-color-picker"
-              />
-              <input
-                className="input-field team-name-input"
-                value={teamNames[i]}
-                onChange={e => {
-                  const next = [...teamNames]; next[i] = e.target.value; setTeamNames(next);
-                }}
-                maxLength={20}
-                placeholder={`اسم الفريق ${i + 1}`}
-              />
+              <input type="color" value={colors[i]}
+                onChange={e => { const c=[...colors]; c[i]=e.target.value; setColors(c); }}
+                className="team-color-picker" />
+              <input className="input-field team-name-input"
+                value={names[i]}
+                onChange={e => { const n=[...names]; n[i]=e.target.value; setNames(n); }}
+                maxLength={20} placeholder={`الفريق ${i+1}`} />
             </div>
           ))}
         </div>
 
-        {/* Theme picker */}
+        {/* Theme presets */}
         <div className="theme-picker">
-          <label>ثيم اللعبة:</label>
+          <label>ثيم الألوان:</label>
           <div className="theme-presets">
             {Object.values(HUROOF_THEMES).map(t => (
-              <button
-                key={t.id}
-                title={t.name}
+              <button key={t.id} title={t.name}
                 className={`theme-swatch ${themeId === t.id ? 'active' : ''}`}
-                style={{ '--swatch-a': t.teamA.main, '--swatch-b': t.teamB.main }}
-                onClick={() => { setThemeId(t.id); saveTheme(t.id); }}
-              >
+                onClick={() => { setThemeId(t.id); saveTheme(t.id); }}>
                 <span style={{ background: t.teamA.main }} />
                 <span style={{ background: t.teamB.main }} />
               </button>
             ))}
-            <button
-              title="مخصص"
+            <button title="مخصص"
               className={`theme-swatch ${themeId === 'custom' ? 'active' : ''}`}
-              onClick={() => setThemeId('custom')}
-            >
+              onClick={() => setThemeId('custom')}>
               <span style={{ background: customA }} />
               <span style={{ background: customB }} />
             </button>
           </div>
           {themeId === 'custom' && (
             <div className="custom-theme-row">
-              <label>أ:</label>
+              <label>اللون أ:</label>
               <input type="color" value={customA} onChange={e => setCustomA(e.target.value)} />
-              <label>ب:</label>
+              <label>اللون ب:</label>
               <input type="color" value={customB} onChange={e => setCustomB(e.target.value)} />
             </div>
           )}
         </div>
 
-        <button className="btn-green start-game-btn" onClick={handleStart}>
+        <button className="btn-green start-game-btn" onClick={start}>
           ابدأ اللعبة ⬡
         </button>
       </div>
@@ -214,42 +164,44 @@ function SetupScreen({ onStart, navigate }) {
   );
 }
 
-// ── Hex Grid ───────────────────────────────────────────────────────────────────
-function HexGrid({ hexGrid, teams, activeHexIdx, selectableIdxs, onSelectHex, phase }) {
-  let rowStart = 0;
+// ── Flat-Top Hex Grid ──────────────────────────────────────────────────────────
+function HexGrid({ grid, teams, activeIdx, selectableIdxs, onSelect, phase }) {
+  let cursor = 0;
   return (
     <div className="hex-grid-container">
       <div className="hex-grid" dir="ltr">
         {HEX_ROWS.map((count, rowIdx) => {
-          const hexesInRow = hexGrid.slice(rowStart, rowStart + count);
+          const rowHexes = grid.slice(cursor, cursor + count);
+          cursor += count;
           const isOdd = rowIdx % 2 === 1;
-          rowStart += count;
           return (
             <div key={rowIdx} className={`hex-row ${isOdd ? 'hex-row-odd' : ''}`}>
-              {hexesInRow.map((hex) => {
-                const isOwned    = hex.owner !== null;
-                const isActive   = hex.index === activeHexIdx;
+              {rowHexes.map(hex => {
+                const isOwned    = hex.owner !== null && hex.owner !== -1;
+                const isSkipped  = hex.owner === -1;
+                const isActive   = hex.index === activeIdx;
+                const isCenter   = hex.index === CENTER_IDX && hex.owner === null && phase !== 'path-select';
                 const isSelect   = selectableIdxs.includes(hex.index);
-                const isCenter   = hex.index === CENTER_IDX;
+                const canClick   = phase === 'path-select' && isSelect && !isOwned;
                 const ownerTeam  = isOwned ? teams[hex.owner] : null;
-                const canClick   = phase === 'path-select' && isSelect;
 
                 return (
                   <button
                     key={hex.index}
                     className={[
                       'hex-cell',
-                      isOwned ? 'hex-owned' : '',
-                      isActive ? 'selected-cell' : '',
+                      isOwned   ? 'hex-owned'          : '',
+                      isSkipped ? 'hex-skipped'         : '',
+                      isActive  ? 'selected-cell'       : '',
+                      isCenter  ? 'center-hex'          : '',
                       isSelect && !isOwned ? 'adjacent-selectable' : '',
-                      isCenter && !isOwned && phase !== 'path-select' ? 'center-hex' : '',
-                      canClick ? 'clickable' : '',
+                      canClick  ? 'clickable'            : '',
                     ].filter(Boolean).join(' ')}
                     style={ownerTeam ? {
                       '--cell-color':     ownerTeam.color,
-                      '--cell-color-dim': makeRgba(ownerTeam.color, 0.18),
+                      '--cell-color-dim': rgba(ownerTeam.color, 0.18),
                     } : {}}
-                    onClick={() => canClick && onSelectHex(hex.index)}
+                    onClick={() => canClick && onSelect(hex.index)}
                     disabled={!canClick}
                   >
                     <div className="hex-cell-inner">{hex.letter}</div>
@@ -265,52 +217,44 @@ function HexGrid({ hexGrid, teams, activeHexIdx, selectableIdxs, onSelectHex, ph
 }
 
 // ── Score Bar ──────────────────────────────────────────────────────────────────
-function ScoreBar({ teams, controlTeamIdx }) {
+function ScoreBar({ teams, controlIdx }) {
   return (
     <div className="score-bar">
       {teams.map((t, i) => (
-        <div
-          key={i}
-          className={`score-item ${controlTeamIdx === i ? 'score-active' : ''}`}
+        <div key={i} className={`score-item ${controlIdx === i ? 'score-active' : ''}`}
           style={{
-            '--sc': t.color,
-            '--sc-dim': makeRgba(t.color, 0.15),
-            '--sc-border': makeRgba(t.color, 0.35),
-          }}
-        >
+            '--sc':       t.color,
+            '--sc-dim':   rgba(t.color, 0.14),
+            '--sc-border':rgba(t.color, 0.35),
+            '--sc-glow':  rgba(t.color, 0.4),
+          }}>
           <span className="score-dot" style={{ background: t.color }} />
-          <span>{t.name}</span>
-          <span className="score-pts">{t.score}</span>
+          {t.name}
+          <strong className="score-pts">{t.score}</strong>
         </div>
       ))}
     </div>
   );
 }
 
-// ── Buzzer Panel ───────────────────────────────────────────────────────────────
-function BuzzerPanel({ teams, buzzedTeamIdx, onBuzz, timerRunning, onTimerEnd }) {
+// ── Buzzer Overlay ─────────────────────────────────────────────────────────────
+function BuzzerOverlay({ teams, buzzedIdx, onBuzz, timerRun, onTimeout }) {
   return (
     <div className="buzzer-overlay">
       <div className="buzzer-card">
-        <div className="buzzer-title">
-          {buzzedTeamIdx === null ? '⚡ اضغط الجرس أولاً!' : `🎯 ${teams[buzzedTeamIdx].name}`}
+        <div className="buzzer-badge">
+          {buzzedIdx === null ? '⚡ اضغط الجرس أولاً!' : `🎯 ${teams[buzzedIdx].name}`}
         </div>
-        {buzzedTeamIdx === null && (
-          <Timer duration={BUZZER_TIME} running={timerRunning} onEnd={onTimerEnd} key="buzzer-timer" />
+        {buzzedIdx === null && (
+          <Timer duration={BUZZER_TIME} running={timerRun} onEnd={onTimeout} key="bz" />
         )}
-        <div className="buzzer-teams">
+        <div className="buzzer-team-grid">
           {teams.map((t, i) => (
-            <button
-              key={i}
-              className={`buzzer-team-btn ${buzzedTeamIdx === i ? 'pressed' : ''}`}
-              style={{
-                '--bt': t.color,
-                '--bt-dim': makeRgba(t.color, 0.2),
-                '--bt-glow': makeRgba(t.color, 0.4),
-              }}
-              onClick={() => buzzedTeamIdx === null && onBuzz(i)}
-              disabled={buzzedTeamIdx !== null}
-            >
+            <button key={i}
+              className={`buzzer-btn ${buzzedIdx === i ? 'pressed' : ''}`}
+              style={{ '--bt': t.color, '--bt-dim': rgba(t.color, 0.2), '--bt-glow': rgba(t.color, 0.45) }}
+              onClick={() => buzzedIdx === null && onBuzz(i)}
+              disabled={buzzedIdx !== null}>
               {t.name}
             </button>
           ))}
@@ -320,38 +264,33 @@ function BuzzerPanel({ teams, buzzedTeamIdx, onBuzz, timerRunning, onTimerEnd })
   );
 }
 
-// ── Answer Panel ───────────────────────────────────────────────────────────────
-function AnswerPanel({ question, letter, activeTeam, isSteal, stealTeam, selectedAnswer, onAnswer, timerRunning, onTimerEnd }) {
-  const team = isSteal ? stealTeam : activeTeam;
+// ── Answer Overlay ─────────────────────────────────────────────────────────────
+function AnswerOverlay({ question, letter, team, isSteal, selAns, onAnswer, timerRun, onTimeout }) {
   return (
     <div className="buzzer-overlay">
       <div className="buzzer-card">
         {isSteal && (
-          <div className="steal-banner steal-banner-overlay pop-in">
-            ⚡ فرصة السرقة — {stealTeam?.name}
-          </div>
+          <div className="steal-pill">⚡ فرصة السرقة</div>
         )}
-        <div className="buzzer-title" style={{ color: team?.color }}>
+        <div className="buzzer-badge" style={{ color: team?.color }}>
           {team?.name}
         </div>
-        <div className="q-letter-badge" style={{ background: team?.color, color: '#fff' }}>
+        <div className="letter-badge" style={{ background: team?.color || 'var(--huroof-accent)' }}>
           {letter}
         </div>
-        <p className="buzzer-question">{question?.text}</p>
+        <p className="q-text">{question?.text}</p>
         <Timer
           duration={isSteal ? STEAL_TIME : ANSWER_TIME}
-          running={timerRunning}
-          onEnd={onTimerEnd}
-          key={isSteal ? 'steal' : 'answer'}
+          running={timerRun}
+          onEnd={onTimeout}
+          key={isSteal ? 'steal' : 'ans'}
         />
-        <div className="buzzer-options">
+        <div className="opts-grid">
           {question?.options?.map((opt, i) => (
-            <button
-              key={i}
-              className={`buzzer-option-btn ${selectedAnswer === i ? 'answered' : ''}`}
-              onClick={() => selectedAnswer === null && onAnswer(i)}
-              disabled={selectedAnswer !== null}
-            >
+            <button key={i}
+              className={`opt-btn ${selAns === i ? 'picked' : ''}`}
+              onClick={() => selAns === null && onAnswer(i)}
+              disabled={selAns !== null}>
               {opt}
             </button>
           ))}
@@ -364,392 +303,352 @@ function AnswerPanel({ question, letter, activeTeam, isSteal, stealTeam, selecte
 // ── Result Flash ───────────────────────────────────────────────────────────────
 function ResultFlash({ result }) {
   if (!result) return null;
-  const cls = result.type === 'correct' ? 'correct' : result.type === 'timeout' ? 'wrong' : 'wrong';
+  const cls = result.correct ? 'flash-correct' : 'flash-wrong';
   return (
-    <div className={`result-flash pop-in ${cls}`}>
-      {result.type === 'correct' && `✅ ${result.teamName} — إجابة صحيحة!`}
-      {result.type === 'wrong' && `❌ خطأ — الصواب: ${result.correctAnswer}`}
-      {result.type === 'timeout' && `⏰ انتهى الوقت — الصواب: ${result.correctAnswer}`}
-      {result.type === 'no-buzz' && '⏱ لم يضغط أحد الجرس — تجاوز الخلية'}
+    <div className={`result-flash ${cls} pop-in`}>
+      {result.correct  && `✅ ${result.teamName} — إجابة صحيحة!`}
+      {!result.correct && !result.timeout && `❌ خطأ — الصواب: ${result.answer}`}
+      {result.timeout  && `⏰ انتهى الوقت — الصواب: ${result.answer}`}
+      {result.noBuzz   && '⏱ لم يضغط أحد — تجاوز الحرف'}
     </div>
   );
 }
 
-// ── Main Game Hook ─────────────────────────────────────────────────────────────
-function useHuroofGame(teams) {
-  const [hexGrid, setHexGrid]         = useState(() => buildHexGrid());
-  const [phase, setPhase]             = useState('pre-question');
-  // 'pre-question' | 'buzzing' | 'answering' | 'steal' | 'result' | 'path-select' | 'gameover'
-  const [activeHexIdx, setActiveHexIdx] = useState(CENTER_IDX);
-  const [controlTeamIdx, setControlTeamIdx] = useState(null); // who picks next
-  const [buzzedTeamIdx, setBuzzedTeamIdx]   = useState(null);
-  const [currentQuestion, setCurrentQuestion] = useState(null);
-  const [selectedAnswer, setSelectedAnswer]   = useState(null);
-  const [resultInfo, setResultInfo]           = useState(null);
-  const [buzzerRunning, setBuzzerRunning]     = useState(false);
-  const [answerRunning, setAnswerRunning]     = useState(false);
-  const [teamsState, setTeamsState]           = useState(teams);
-  const [round, setRound]                     = useState(1);
-  const [stealQueue, setStealQueue]           = useState([]); // teams that haven't stolen yet
-  const [isSteal, setIsSteal]                 = useState(false);
-  const [selectableIdxs, setSelectableIdxs]   = useState([CENTER_IDX]);
-  const preQTimeout = useRef(null);
+// ── Game Hook ──────────────────────────────────────────────────────────────────
+function useGame(initTeams) {
+  const [grid,        setGrid]        = useState(() => buildGrid());
+  const [teams,       setTeams]       = useState(initTeams);
+  const [phase,       setPhase]       = useState('pre');
+  // phase: 'pre' | 'buzzing' | 'answering' | 'steal' | 'result' | 'path-select' | 'over'
+  const [activeIdx,   setActiveIdx]   = useState(CENTER_IDX);
+  const [controlIdx,  setControlIdx]  = useState(null);
+  const [buzzedIdx,   setBuzzedIdx]   = useState(null);
+  const [question,    setQuestion]    = useState(null);
+  const [selAns,      setSelAns]      = useState(null);
+  const [result,      setResult]      = useState(null);
+  const [buzzerRun,   setBuzzerRun]   = useState(false);
+  const [answerRun,   setAnswerRun]   = useState(false);
+  const [selectable,  setSelectable]  = useState([CENTER_IDX]);
+  const [isSteal,     setIsSteal]     = useState(false);
+  const [stealQueue,  setStealQueue]  = useState([]);
+  const [round,       setRound]       = useState(1);
+  const preTimer = useRef(null);
 
-  // Load question for active hex
-  const loadQuestion = useCallback((hexIdx, grid) => {
-    const hex = grid[hexIdx];
-    const qs = getQuestionsByLetter ? getQuestionsByLetter(hex.letter) : [];
-    return qs.length > 0
-      ? qs[Math.floor(Math.random() * qs.length)]
-      : (getRandomQuestion ? getRandomQuestion() : null);
-  }, []);
-
-  // Start buzzer phase for current active hex
-  const startBuzzer = useCallback((grid, hexIdx) => {
-    const q = loadQuestion(hexIdx, grid);
-    setCurrentQuestion(q);
-    setBuzzedTeamIdx(null);
-    setSelectedAnswer(null);
-    setResultInfo(null);
+  const openBuzzer = useCallback((g, idx) => {
+    const q = loadQ(g[idx].letter);
+    setQuestion(q);
+    setBuzzedIdx(null);
+    setSelAns(null);
+    setResult(null);
     setIsSteal(false);
     setStealQueue([]);
     setPhase('buzzing');
-    setBuzzerRunning(true);
-    setAnswerRunning(false);
-  }, [loadQuestion]);
+    setBuzzerRun(true);
+    setAnswerRun(false);
+  }, []);
 
-  // Initialize: pre-question delay then open buzzer
+  // Initial: pre-delay then buzzer
   useEffect(() => {
-    preQTimeout.current = setTimeout(() => {
-      startBuzzer(hexGrid, CENTER_IDX);
-    }, PRE_Q_DELAY);
-    return () => clearTimeout(preQTimeout.current);
+    preTimer.current = setTimeout(() => openBuzzer(grid, CENTER_IDX), PRE_Q_MS);
+    return () => clearTimeout(preTimer.current);
   }, []); // eslint-disable-line
 
-  // Team buzzes in
-  const onBuzz = useCallback((teamIdx) => {
-    setBuzzedTeamIdx(teamIdx);
-    setBuzzerRunning(false);
+  const buzz = useCallback((tIdx) => {
+    setBuzzedIdx(tIdx);
+    setBuzzerRun(false);
+    setIsSteal(false);
+    setStealQueue(initTeams.map((_, i) => i).filter(i => i !== tIdx));
     setPhase('answering');
-    setAnswerRunning(true);
-    // Build steal queue (all other teams, in order)
-    setStealQueue(teams.map((_, i) => i).filter(i => i !== teamIdx));
-  }, [teams]);
+    setAnswerRun(true);
+  }, [initTeams]);
 
-  // No one buzzed in time
-  const onBuzzerTimeout = useCallback(() => {
-    setBuzzerRunning(false);
-    setResultInfo({ type: 'no-buzz', correctAnswer: currentQuestion?.answer });
+  const noBuzz = useCallback(() => {
+    setBuzzerRun(false);
+    setResult({ noBuzz: true, answer: question?.answer });
     setPhase('result');
-    // After result: pick next selectable hex if control team exists, else pass turn
     setTimeout(() => {
-      setResultInfo(null);
-      // Mark hex as claimed by nobody (skip)
-      setHexGrid(prev => {
-        const next = prev.map((h, i) => i === activeHexIdx ? { ...h, owner: -1 } : h);
-        advanceRound(next, controlTeamIdx, round);
+      setResult(null);
+      setGrid(prev => {
+        const next = prev.map((h, i) => i === activeIdx ? { ...h, owner: -1 } : h);
+        advanceAfterSkip(next);
         return next;
       });
     }, 2200);
-  }, [currentQuestion, activeHexIdx, controlTeamIdx, round]); // eslint-disable-line
+  }, [question, activeIdx]); // eslint-disable-line
 
-  // Player submits answer
-  const onAnswer = useCallback((answerIdx) => {
-    setAnswerRunning(false);
-    setSelectedAnswer(answerIdx);
-    const isCorrect = currentQuestion?.options?.[answerIdx] === currentQuestion?.answer;
+  const answer = useCallback((aIdx) => {
+    setAnswerRun(false);
+    setSelAns(aIdx);
+    const correct = question?.options?.[aIdx] === question?.answer;
+    const winnerIdx = isSteal ? stealQueue[0] : buzzedIdx;
 
-    if (isCorrect) {
-      const winnerIdx = isSteal ? stealQueue[0] : buzzedTeamIdx;
-      // Update score and grid
-      setTeamsState(prev => prev.map((t, i) =>
+    if (correct) {
+      setTeams(prev => prev.map((t, i) =>
         i === winnerIdx ? { ...t, score: t.score + 1 } : t
       ));
-      setHexGrid(prev => {
+      setGrid(prev => {
         const next = prev.map((h, i) =>
-          i === activeHexIdx ? { ...h, owner: winnerIdx } : h
+          i === activeIdx ? { ...h, owner: winnerIdx } : h
         );
         return next;
       });
-      setResultInfo({ type: 'correct', teamName: teams[winnerIdx]?.name, correctAnswer: currentQuestion?.answer });
+      setResult({ correct: true, teamName: initTeams[winnerIdx]?.name, answer: question?.answer });
       setPhase('result');
-      // After result: let winner pick next path
       setTimeout(() => {
-        setResultInfo(null);
-        setHexGrid(prev => {
+        setResult(null);
+        setGrid(prev => {
           const unclaimed = prev.filter(h => h.owner === null).length;
-          if (unclaimed === 0) {
-            setPhase('gameover');
-            return prev;
-          }
-          const nextSelectable = getSelectableForTeam(prev, winnerIdx, false);
-          setSelectableIdxs(nextSelectable);
-          setControlTeamIdx(winnerIdx);
+          if (unclaimed === 0) { setPhase('over'); return prev; }
+          // Winner picks ANY unowned hex
+          const sel = getSelectable(prev, false);
+          setSelectable(sel);
+          setControlIdx(winnerIdx);
           setPhase('path-select');
           return prev;
         });
       }, 2200);
     } else {
-      // Wrong answer
-      setResultInfo({ type: 'wrong', correctAnswer: currentQuestion?.answer });
+      setResult({ correct: false, answer: question?.answer });
       setPhase('result');
       setTimeout(() => {
-        setResultInfo(null);
-        // Try steal: give remaining teams a chance
+        setResult(null);
         const remaining = isSteal ? stealQueue.slice(1) : stealQueue;
         if (remaining.length > 0) {
+          // Next team in queue steals
           setIsSteal(true);
           setStealQueue(remaining);
-          setBuzzedTeamIdx(null);
-          setSelectedAnswer(null);
-          setResultInfo(null);
+          setBuzzedIdx(null);
+          setSelAns(null);
           setPhase('steal');
-          setAnswerRunning(true);
+          setAnswerRun(true);
         } else {
-          // No one answered correctly — skip hex
-          setHexGrid(prev => {
-            const next = prev.map((h, i) => i === activeHexIdx ? { ...h, owner: -1 } : h);
-            advanceRound(next, controlTeamIdx, round);
+          // No one got it — skip hex
+          setGrid(prev => {
+            const next = prev.map((h, i) => i === activeIdx ? { ...h, owner: -1 } : h);
+            advanceAfterSkip(next);
             return next;
           });
         }
       }, 1800);
     }
-  }, [currentQuestion, isSteal, stealQueue, buzzedTeamIdx, activeHexIdx, teams, controlTeamIdx, round]); // eslint-disable-line
+  }, [question, isSteal, stealQueue, buzzedIdx, activeIdx, initTeams]); // eslint-disable-line
 
-  // Answer timer expired
-  const onAnswerTimeout = useCallback(() => {
-    setAnswerRunning(false);
-    setResultInfo({ type: 'timeout', correctAnswer: currentQuestion?.answer });
+  const answerTimeout = useCallback(() => {
+    setAnswerRun(false);
+    setResult({ correct: false, timeout: true, answer: question?.answer });
     setPhase('result');
     setTimeout(() => {
-      setResultInfo(null);
+      setResult(null);
       const remaining = isSteal ? stealQueue.slice(1) : stealQueue;
       if (remaining.length > 0) {
         setIsSteal(true);
         setStealQueue(remaining);
-        setBuzzedTeamIdx(null);
-        setSelectedAnswer(null);
+        setBuzzedIdx(null);
+        setSelAns(null);
         setPhase('steal');
-        setAnswerRunning(true);
+        setAnswerRun(true);
       } else {
-        setHexGrid(prev => {
-          const next = prev.map((h, i) => i === activeHexIdx ? { ...h, owner: -1 } : h);
-          advanceRound(next, controlTeamIdx, round);
+        setGrid(prev => {
+          const next = prev.map((h, i) => i === activeIdx ? { ...h, owner: -1 } : h);
+          advanceAfterSkip(next);
           return next;
         });
       }
     }, 1800);
-  }, [currentQuestion, isSteal, stealQueue, activeHexIdx, controlTeamIdx, round]); // eslint-disable-line
+  }, [question, isSteal, stealQueue, activeIdx]); // eslint-disable-line
 
-  // Control team selects next hex
-  const onSelectHex = useCallback((hexIdx) => {
-    setActiveHexIdx(hexIdx);
-    setSelectableIdxs([]);
-    setPhase('pre-question');
+  const selectHex = useCallback((idx) => {
+    clearTimeout(preTimer.current);
+    setActiveIdx(idx);
+    setSelectable([]);
+    setPhase('pre');
     setRound(r => r + 1);
-    preQTimeout.current = setTimeout(() => {
-      startBuzzer(hexGrid, hexIdx);
-    }, PRE_Q_DELAY);
-  }, [hexGrid, startBuzzer]); // eslint-disable-line
+    preTimer.current = setTimeout(() => {
+      setGrid(g => { openBuzzer(g, idx); return g; });
+    }, PRE_Q_MS);
+  }, [openBuzzer]);
 
-  // Helper: advance to next round after skipped hex
-  function advanceRound(grid, ctrlIdx, currentRound) {
-    const unclaimed = grid.filter(h => h.owner === null).length;
-    if (unclaimed === 0) {
-      setPhase('gameover');
-      return;
-    }
-    if (ctrlIdx !== null) {
-      const nextSel = getSelectableForTeam(grid, ctrlIdx, false);
-      setSelectableIdxs(nextSel);
-      setControlTeamIdx(ctrlIdx);
+  function advanceAfterSkip(g) {
+    const unclaimed = g.filter(h => h.owner === null).length;
+    if (unclaimed === 0) { setPhase('over'); return; }
+    if (controlIdx !== null) {
+      setSelectable(getSelectable(g, false));
       setPhase('path-select');
     } else {
-      // First round skipped — let all teams see next hex
-      setSelectableIdxs(grid.filter(h => h.owner === null).map(h => h.index));
+      setSelectable(getSelectable(g, false));
       setPhase('path-select');
     }
-    setRound(currentRound + 1);
+    setRound(r => r + 1);
   }
 
-  // Cleanup
-  useEffect(() => () => clearTimeout(preQTimeout.current), []);
+  useEffect(() => () => clearTimeout(preTimer.current), []);
+
+  const stealingTeam = isSteal && stealQueue.length > 0 ? teams[stealQueue[0]] : null;
+  const activeTeam   = buzzedIdx !== null ? teams[buzzedIdx] : null;
+  const currentTeam  = isSteal ? stealingTeam : activeTeam;
 
   return {
-    hexGrid, phase, activeHexIdx, controlTeamIdx, buzzedTeamIdx,
-    currentQuestion, selectedAnswer, resultInfo,
-    buzzerRunning, answerRunning, teamsState, selectableIdxs,
-    isSteal, stealQueue,
-    onBuzz, onBuzzerTimeout, onAnswer, onAnswerTimeout, onSelectHex,
+    grid, teams, phase, activeIdx, controlIdx, buzzedIdx,
+    question, selAns, result, buzzerRun, answerRun,
+    selectable, stealingTeam, currentTeam,
+    buzz, noBuzz, answer, answerTimeout, selectHex,
   };
 }
 
-// ── Game Screen ────────────────────────────────────────────────────────────────
-function GameScreen({ teams, onBack }) {
-  const g = useHuroofGame(teams);
-
-  const activeTeam   = g.buzzedTeamIdx !== null ? teams[g.buzzedTeamIdx] : null;
-  const stealingTeam = g.isSteal && g.stealQueue.length > 0 ? teams[g.stealQueue[0]] : null;
-  const ctrlTeam     = g.controlTeamIdx !== null ? g.teamsState[g.controlTeamIdx] : null;
-
-  // Count owned hexes per team
-  const ownedCount = teams.map((_, i) =>
-    g.hexGrid.filter(h => h.owner === i).length
-  );
-
-  if (g.phase === 'gameover') {
-    const maxScore = Math.max(...g.teamsState.map(t => t.score));
-    const winners  = g.teamsState.filter(t => t.score === maxScore);
-    return (
-      <div className="page asbiq-gameover">
-        <div className="gameover-hero pop-in">
-          <div className="gameover-trophy">🏆</div>
-          <h1 className="winner-text" style={{ color: winners[0]?.color }}>
-            {winners.length === 1
-              ? `فاز ${winners[0].name}!`
-              : `تعادل: ${winners.map(w => w.name).join(' & ')}!`}
-          </h1>
-        </div>
-
-        {/* Final grid */}
-        <div className="final-grid-wrap">
-          <HexGrid
-            hexGrid={g.hexGrid}
-            teams={g.teamsState}
-            activeHexIdx={-1}
-            selectableIdxs={[]}
-            onSelectHex={() => {}}
-            phase="gameover"
-          />
-        </div>
-
-        {/* Scores */}
-        <div className="score-bar" style={{ marginTop: 16 }}>
-          {g.teamsState.map((t, i) => (
-            <div key={i} className="score-item"
-              style={{ '--sc': t.color, '--sc-dim': makeRgba(t.color, 0.15), '--sc-border': makeRgba(t.color, 0.35) }}>
-              <span className="score-dot" style={{ background: t.color }} />
-              <span>{t.name}</span>
-              <span className="score-pts">{t.score} خلية</span>
-            </div>
-          ))}
-        </div>
-
-        <div className="gameover-actions">
-          <button className="btn-secondary" onClick={onBack}>العب مجدداً</button>
-        </div>
+// ── Game Over Screen ───────────────────────────────────────────────────────────
+function GameOver({ teams, grid, onBack }) {
+  const maxScore = Math.max(...teams.map(t => t.score));
+  const winners  = teams.filter(t => t.score === maxScore);
+  return (
+    <div className="page asbiq-gameover">
+      <div className="gameover-hero pop-in">
+        <div className="gameover-trophy">🏆</div>
+        <h1 className="winner-text" style={{ color: winners[0]?.color }}>
+          {winners.length === 1
+            ? `فاز ${winners[0].name}!`
+            : `تعادل: ${winners.map(w => w.name).join(' & ')}!`}
+        </h1>
       </div>
-    );
+      <div className="final-grid-wrap">
+        <HexGrid
+          grid={grid} teams={teams}
+          activeIdx={-1} selectableIdxs={[]}
+          onSelect={() => {}} phase="over"
+        />
+      </div>
+      <div className="score-bar" style={{ marginTop: 14 }}>
+        {teams.map((t, i) => (
+          <div key={i} className="score-item"
+            style={{ '--sc': t.color, '--sc-dim': rgba(t.color,0.15), '--sc-border': rgba(t.color,0.35) }}>
+            <span className="score-dot" style={{ background: t.color }} />
+            {t.name} — <strong>{t.score} خلية</strong>
+          </div>
+        ))}
+      </div>
+      <div className="gameover-actions">
+        <button className="btn-secondary" onClick={onBack}>العب مجدداً</button>
+      </div>
+    </div>
+  );
+}
+
+// ── Game Screen ────────────────────────────────────────────────────────────────
+function GameScreen({ initTeams, onBack }) {
+  const g = useGame(initTeams);
+
+  if (g.phase === 'over') {
+    return <GameOver teams={g.teams} grid={g.grid} onBack={onBack} />;
   }
+
+  const ctrlTeam = g.controlIdx !== null ? g.teams[g.controlIdx] : null;
+  const ownedCounts = initTeams.map((_, i) => g.grid.filter(h => h.owner === i).length);
+
+  const phaseLabel = {
+    pre:          '🔍 استعدوا...',
+    buzzing:      '⚡ اضغط الجرس!',
+    answering:    g.currentTeam ? `🎯 ${g.currentTeam.name} يجيب` : '',
+    steal:        g.stealingTeam ? `⚡ سرقة — ${g.stealingTeam.name}` : '',
+    result:       '📋 النتيجة',
+    'path-select': ctrlTeam ? `🗺 ${ctrlTeam.name} — اختر أي حرف في الشبكة` : '',
+  }[g.phase] || '';
 
   return (
     <div className="huroof-game-page">
       {/* Header */}
       <div className="huroof-header">
         <button className="back-btn-inline" onClick={onBack}>← العودة</button>
-        <div className="huroof-phase-label">
-          {g.phase === 'pre-question'  && '🔍 جاهزوا...'}
-          {g.phase === 'buzzing'       && '⚡ اضغط الجرس!'}
-          {g.phase === 'answering'     && (activeTeam ? `🎯 ${activeTeam.name} يجيب` : '')}
-          {g.phase === 'steal'         && (stealingTeam ? `⚡ سرقة — ${stealingTeam.name}` : '')}
-          {g.phase === 'result'        && '📋 النتيجة'}
-          {g.phase === 'path-select'   && (ctrlTeam ? `🗺 ${ctrlTeam.name} يختار الخلية التالية` : '')}
-        </div>
+        <div className="huroof-phase-label">{phaseLabel}</div>
       </div>
 
       {/* Scores */}
-      <ScoreBar teams={g.teamsState} controlTeamIdx={g.controlTeamIdx} />
+      <ScoreBar teams={g.teams} controlIdx={g.controlIdx} />
 
-      {/* Result flash (shown above grid) */}
-      {g.resultInfo && <ResultFlash result={g.resultInfo} />}
+      {/* Path-select hint */}
+      {g.phase === 'path-select' && ctrlTeam && (
+        <div className="path-select-hint" style={{
+          borderColor: rgba(ctrlTeam.color, 0.5),
+          color: ctrlTeam.color,
+          background: rgba(ctrlTeam.color, 0.08),
+        }}>
+          🗺 {ctrlTeam.name} — اضغط على أي حرف لم يُؤخذ بعد
+        </div>
+      )}
 
-      {/* Hex Grid */}
+      {/* Result flash */}
+      {g.result && <ResultFlash result={g.result} />}
+
+      {/* Hex grid */}
       <HexGrid
-        hexGrid={g.hexGrid}
-        teams={g.teamsState}
-        activeHexIdx={g.activeHexIdx}
-        selectableIdxs={g.selectableIdxs}
-        onSelectHex={g.onSelectHex}
+        grid={g.grid}
+        teams={g.teams}
+        activeIdx={g.activeIdx}
+        selectableIdxs={g.selectable}
+        onSelect={g.selectHex}
         phase={g.phase}
       />
 
       {/* Legend */}
       <div className="teams-legend">
-        {teams.map((t, i) => (
+        {initTeams.map((t, i) => (
           <div key={i} className="legend-item"
-            style={{ color: t.color, borderColor: makeRgba(t.color, 0.4), background: makeRgba(t.color, 0.08) }}>
+            style={{ color: t.color, borderColor: rgba(t.color, 0.4), background: rgba(t.color, 0.07) }}>
             <span className="score-dot" style={{ background: t.color }} />
-            {t.name}: {ownedCount[i]} خلية
+            {t.name}: {ownedCounts[i]} خلية
           </div>
         ))}
       </div>
 
-      {/* Overlays */}
-      {(g.phase === 'buzzing') && (
-        <BuzzerPanel
-          teams={teams}
-          buzzedTeamIdx={g.buzzedTeamIdx}
-          onBuzz={g.onBuzz}
-          timerRunning={g.buzzerRunning}
-          onTimerEnd={g.onBuzzerTimeout}
+      {/* Buzzer overlay */}
+      {g.phase === 'buzzing' && (
+        <BuzzerOverlay
+          teams={initTeams}
+          buzzedIdx={g.buzzedIdx}
+          onBuzz={g.buzz}
+          timerRun={g.buzzerRun}
+          onTimeout={g.noBuzz}
         />
       )}
 
+      {/* Answer overlay */}
       {(g.phase === 'answering') && (
-        <AnswerPanel
-          question={g.currentQuestion}
-          letter={g.hexGrid[g.activeHexIdx]?.letter}
-          activeTeam={activeTeam}
+        <AnswerOverlay
+          question={g.question}
+          letter={g.grid[g.activeIdx]?.letter}
+          team={g.currentTeam}
           isSteal={false}
-          stealTeam={null}
-          selectedAnswer={g.selectedAnswer}
-          onAnswer={g.onAnswer}
-          timerRunning={g.answerRunning}
-          onTimerEnd={g.onAnswerTimeout}
+          selAns={g.selAns}
+          onAnswer={g.answer}
+          timerRun={g.answerRun}
+          onTimeout={g.answerTimeout}
         />
       )}
 
-      {(g.phase === 'steal') && stealingTeam && (
-        <AnswerPanel
-          question={g.currentQuestion}
-          letter={g.hexGrid[g.activeHexIdx]?.letter}
-          activeTeam={activeTeam}
+      {/* Steal overlay */}
+      {g.phase === 'steal' && g.stealingTeam && (
+        <AnswerOverlay
+          question={g.question}
+          letter={g.grid[g.activeIdx]?.letter}
+          team={g.stealingTeam}
           isSteal={true}
-          stealTeam={stealingTeam}
-          selectedAnswer={g.selectedAnswer}
-          onAnswer={g.onAnswer}
-          timerRunning={g.answerRunning}
-          onTimerEnd={g.onAnswerTimeout}
+          selAns={g.selAns}
+          onAnswer={g.answer}
+          timerRun={g.answerRun}
+          onTimeout={g.answerTimeout}
         />
       )}
     </div>
   );
 }
 
-// ── Root Component ─────────────────────────────────────────────────────────────
+// ── Root ───────────────────────────────────────────────────────────────────────
 export default function HuroofPage() {
   const navigate = useNavigate();
-  const [teams, setTeams] = useState(null);
+  const [teams,  setTeams]  = useState(null);
 
-  // Apply saved theme on mount
-  useEffect(() => {
-    applyThemeCSS(getSavedTheme());
-  }, []);
+  useEffect(() => { applyThemeCSS(getSavedTheme()); }, []);
 
   if (!teams) {
-    return (
-      <SetupScreen
-        onStart={(t) => setTeams(t)}
-        navigate={navigate}
-      />
-    );
+    return <SetupScreen onStart={setTeams} navigate={navigate} />;
   }
-
-  return (
-    <GameScreen
-      teams={teams}
-      onBack={() => setTeams(null)}
-    />
-  );
+  return <GameScreen initTeams={teams} onBack={() => setTeams(null)} />;
 }

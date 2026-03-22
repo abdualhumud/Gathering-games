@@ -19,6 +19,32 @@ const STEAL_TIME  = 15;
 const TEAM_NAMES  = { A: 'الفريق الأول', B: 'الفريق الثاني' };
 const TEAM_COLORS = { A: 'team-a', B: 'team-b' };
 
+// ── Super Powers ──────────────────────────────────────────────────────────────
+const SUPER_POWERS = [
+  { id: 'fifty',    icon: '50/50', name: 'خمسون خمسون',  desc: 'احذف إجابتين خاطئتين' },
+  { id: 'audience', icon: '👥',   name: 'اسأل الجمهور', desc: 'شاهد نسب إجابات الجمهور' },
+  { id: 'friend',   icon: '📞',   name: 'اتصل بصديق',  desc: '30 ثانية للتشاور مع صديق' },
+];
+
+function genAudiencePoll(options, correctAnswer) {
+  const correctIdx = options.indexOf(correctAnswer);
+  const correctPct = 40 + Math.floor(Math.random() * 31); // 40–70%
+  const remaining  = 100 - correctPct;
+  const others     = options.map((_, i) => i).filter(i => i !== correctIdx);
+  let splits = others.map(() => Math.floor(Math.random() * remaining));
+  const sum = splits.reduce((a, b) => a + b, 0) || 1;
+  splits = splits.map(v => Math.round(v / sum * remaining));
+  // Adjust for rounding to sum to 100
+  const diff = remaining - splits.reduce((a, b) => a + b, 0);
+  splits[0] = (splits[0] || 0) + diff;
+  const result = options.map((_, i) => (i === correctIdx ? correctPct : 0));
+  let j = 0;
+  for (let i = 0; i < options.length; i++) {
+    if (i !== correctIdx) { result[i] = splits[j++] ?? 0; }
+  }
+  return result; // array of percentages per option index
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 // Pre-computed question counts per category (used in setup UI)
@@ -65,6 +91,15 @@ function useLocalGame() {
   const [selectedAnswer, setSelAns] = useState(null);
   const timeoutRef                  = useRef(null);
 
+  // ── Super Powers state ─────────────────────────────────────────────────
+  const [superPowers, setSuperPowers] = useState({
+    A: ['fifty', 'audience', 'friend'],
+    B: ['fifty', 'audience', 'friend'],
+  });
+  const [eliminatedOpts, setEliminatedOpts] = useState([]); // for 50/50
+  const [audiencePoll,   setAudiencePoll]   = useState(null); // % array
+  const [friendTimer,    setFriendTimer]     = useState(false); // show timer overlay
+
   const totalCells = 18;
 
   const toggleCategory = (cat) => {
@@ -88,7 +123,44 @@ function useLocalGame() {
     setTimer(false);
     setCount(0);
     setSelAns(null);
+    setEliminatedOpts([]);
+    setAudiencePoll(null);
+    setFriendTimer(false);
+    setSuperPowers({ A: ['fifty', 'audience', 'friend'], B: ['fifty', 'audience', 'friend'] });
     setScreen('game');
+  };
+
+  // Adjust score manually (moderator panel)
+  const adjustScore = (team, delta) => {
+    setTeams(prev => ({
+      ...prev,
+      [team]: { money: Math.max(0, (prev[team].money || 0) + delta) },
+    }));
+  };
+
+  // Activate a super power for the current active team
+  const useSuperPower = (powerId) => {
+    if (!activeTeam) return;
+    const teamPowers = superPowers[activeTeam] || [];
+    if (!teamPowers.includes(powerId)) return;
+    // Consume the power
+    setSuperPowers(prev => ({
+      ...prev,
+      [activeTeam]: prev[activeTeam].filter(p => p !== powerId),
+    }));
+    const cell = board?.[activeCell?.colIdx]?.cells?.[activeCell?.rowIdx];
+    const opts  = cell?.question?.options || [];
+    const ans   = cell?.question?.answer || '';
+    if (powerId === 'fifty') {
+      // Eliminate 2 wrong options
+      const wrongIdxs = opts.map((o, i) => i).filter(i => opts[i] !== ans);
+      const toElim = wrongIdxs.sort(() => Math.random() - 0.5).slice(0, 2);
+      setEliminatedOpts(toElim);
+    } else if (powerId === 'audience') {
+      setAudiencePoll(genAudiencePoll(opts, ans));
+    } else if (powerId === 'friend') {
+      setFriendTimer(true);
+    }
   };
 
   const pickCell = (colIdx, rowIdx) => {
@@ -148,7 +220,7 @@ function useLocalGame() {
       if (newCount >= totalCells) {
         timeoutRef.current = setTimeout(() => setScreen('gameover'), 2200);
       } else {
-        timeoutRef.current = setTimeout(() => { setScreen('game'); setPhase('pick'); setActiveCell(null); setResultInfo(null); setSelAns(null); }, 2200);
+        timeoutRef.current = setTimeout(() => { setScreen('game'); setPhase('pick'); setActiveCell(null); setResultInfo(null); setSelAns(null); setEliminatedOpts([]); setAudiencePoll(null); setFriendTimer(false); }, 2200);
       }
     } else {
       if (phase === 'answer') {
@@ -178,7 +250,7 @@ function useLocalGame() {
         if (newCount >= totalCells) {
           timeoutRef.current = setTimeout(() => setScreen('gameover'), 2200);
         } else {
-          timeoutRef.current = setTimeout(() => { setScreen('game'); setPhase('pick'); setActiveCell(null); setResultInfo(null); setSelAns(null); }, 2200);
+          timeoutRef.current = setTimeout(() => { setScreen('game'); setPhase('pick'); setActiveCell(null); setResultInfo(null); setSelAns(null); setEliminatedOpts([]); setAudiencePoll(null); setFriendTimer(false); }, 2200);
         }
       }
     }
@@ -217,6 +289,11 @@ function useLocalGame() {
     activeCell, pickCell, currentQuestion, currentPoints,
     submitAnswer, timeUp, timerRunning, selectedAnswer,
     resultInfo, reset, answeredCount, totalCells,
+    // Super powers
+    superPowers, useSuperPower, eliminatedOpts, audiencePoll,
+    friendTimer, setFriendTimer,
+    // Moderator
+    adjustScore,
   };
 }
 
@@ -224,6 +301,7 @@ function useLocalGame() {
 export default function MoneyBoardPage() {
   const navigate = useNavigate();
   const [mode, setMode] = useState(null); // null | 'local' | 'room'
+  const [modOpen, setModOpen] = useState(false); // moderator panel
   const local = useLocalGame();
 
   // Room state
@@ -364,14 +442,28 @@ export default function MoneyBoardPage() {
         {local.resultInfo && (
           <ResultFlash info={local.resultInfo} teamNames={{ A: local.teamAName, B: local.teamBName }} />
         )}
+        {/* Moderator panel trigger */}
+        <button className="mod-panel-btn" onClick={() => setModOpen(true)} title="لوحة المشرف">
+          ⚙️
+        </button>
+        {modOpen && (
+          <ModeratorPanel
+            teams={{ A: { ...local.teams.A, name: local.teamAName }, B: { ...local.teams.B, name: local.teamBName } }}
+            onAdjust={local.adjustScore}
+            onClose={() => setModOpen(false)}
+          />
+        )}
       </div>
     );
 
     // ── Question screen ──
     if (local.screen === 'question') {
-      const isSteal = local.phase === 'steal';
-      const teamName = local.activeTeam === 'A' ? local.teamAName : local.teamBName;
-      const categoryName = local.activeCell ? local.board?.[local.activeCell.colIdx]?.category : '';
+      const isSteal    = local.phase === 'steal';
+      const teamKey    = local.activeTeam || 'A';
+      const teamName   = teamKey === 'A' ? local.teamAName : local.teamBName;
+      const catName    = local.activeCell ? local.board?.[local.activeCell.colIdx]?.category : '';
+      const teamPowers = local.superPowers?.[teamKey] || [];
+      const opts       = local.currentQuestion?.options || [];
       return (
         <div className="mb-question-page">
           <div className="q-page-header">
@@ -388,27 +480,69 @@ export default function MoneyBoardPage() {
           </div>
 
           {isSteal && (
-            <div className="steal-banner pop-in">
-              ⚡ فرصة السرقة! — {teamName}
+            <div className="steal-banner pop-in">⚡ فرصة السرقة! — {teamName}</div>
+          )}
+
+          {/* Super Powers bar */}
+          {!isSteal && (
+            <div className="super-powers-bar">
+              <span className="sp-label">قوى {teamName}:</span>
+              {SUPER_POWERS.map(sp => {
+                const available = teamPowers.includes(sp.id);
+                return (
+                  <button key={sp.id}
+                    className={`sp-btn ${available ? '' : 'sp-used'}`}
+                    title={sp.name + ' — ' + sp.desc}
+                    onClick={() => available && local.selectedAnswer === null && local.useSuperPower(sp.id)}
+                    disabled={!available || local.selectedAnswer !== null}>
+                    {sp.icon} <span className="sp-name">{sp.name}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Call-a-Friend overlay timer */}
+          {local.friendTimer && (
+            <div className="friend-timer-banner pop-in">
+              📞 وقت الاتصال بصديق —
+              <Timer duration={30} running={true} onEnd={() => local.setFriendTimer(false)} key="friend" />
+            </div>
+          )}
+
+          {/* Audience poll */}
+          {local.audiencePoll && (
+            <div className="audience-poll pop-in">
+              <div className="ap-title">👥 نتائج الجمهور:</div>
+              {opts.map((opt, i) => (
+                <div key={i} className="ap-row">
+                  <span className="ap-opt">{opt}</span>
+                  <div className="ap-bar-wrap">
+                    <div className="ap-bar" style={{ width: `${local.audiencePoll[i] || 0}%` }} />
+                  </div>
+                  <span className="ap-pct">{local.audiencePoll[i] || 0}%</span>
+                </div>
+              ))}
             </div>
           )}
 
           <div className="question-card card pop-in">
-            {categoryName && <p className="question-category-tag">{categoryName}</p>}
+            {catName && <p className="question-category-tag">{catName}</p>}
             <p className="question-text">{local.currentQuestion?.text}</p>
           </div>
 
           <div className="options-grid">
-            {local.currentQuestion?.options?.map((opt, i) => (
-              <button
-                key={i}
-                className={`option-btn ${local.selectedAnswer === i ? 'answered' : ''}`}
-                onClick={() => local.submitAnswer(i)}
-                disabled={local.selectedAnswer !== null}
-              >
-                {opt}
-              </button>
-            ))}
+            {opts.map((opt, i) => {
+              const elim = local.eliminatedOpts.includes(i);
+              return (
+                <button key={i}
+                  className={`option-btn ${local.selectedAnswer === i ? 'answered' : ''} ${elim ? 'eliminated' : ''}`}
+                  onClick={() => !elim && local.submitAnswer(i)}
+                  disabled={local.selectedAnswer !== null || elim}>
+                  {opt}
+                </button>
+              );
+            })}
           </div>
         </div>
       );
@@ -705,6 +839,56 @@ function ResultFlash({ info, teamNames }) {
           ? `❌ إجابة خاطئة — الصواب: ${info.correctAnswer}`
           : '❌ إجابة خاطئة'
       }
+    </div>
+  );
+}
+
+// ── Moderator Panel ────────────────────────────────────────────────────────────
+function ModeratorPanel({ teams, onAdjust, onClose }) {
+  const [customA, setCustomA] = useState('');
+  const [customB, setCustomB] = useState('');
+  const QUICK = [100, 200, 400, 600];
+  return (
+    <div className="mod-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="mod-panel card pop-in">
+        <div className="mod-header">
+          <h3>⚙️ لوحة المشرف</h3>
+          <button className="mod-close" onClick={onClose}>✕</button>
+        </div>
+        {['A', 'B'].map(t => (
+          <div key={t} className={`mod-team-section mod-team-${t.toLowerCase()}`}>
+            <div className="mod-team-name">{teams[t]?.name}</div>
+            <div className="mod-money">💰 {(teams[t]?.money || 0).toLocaleString('ar-SA')} ريال</div>
+            <div className="mod-btns">
+              {QUICK.map(v => (
+                <button key={v} className="mod-add-btn" onClick={() => onAdjust(t, v)}>+{v}</button>
+              ))}
+            </div>
+            <div className="mod-btns">
+              {QUICK.map(v => (
+                <button key={v} className="mod-sub-btn" onClick={() => onAdjust(t, -v)}>−{v}</button>
+              ))}
+            </div>
+            <div className="mod-custom-row">
+              <input
+                type="number" min="0" step="100"
+                placeholder="مبلغ مخصص"
+                value={t === 'A' ? customA : customB}
+                onChange={e => t === 'A' ? setCustomA(e.target.value) : setCustomB(e.target.value)}
+                className="input-field mod-custom-input"
+              />
+              <button className="mod-add-btn"
+                onClick={() => { const v = parseInt(t === 'A' ? customA : customB) || 0; onAdjust(t, v); }}>
+                أضف +
+              </button>
+              <button className="mod-sub-btn"
+                onClick={() => { const v = parseInt(t === 'A' ? customA : customB) || 0; onAdjust(t, -v); }}>
+                اخصم −
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
