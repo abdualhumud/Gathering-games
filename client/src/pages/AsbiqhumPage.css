@@ -1,113 +1,282 @@
-/* ── Setup ─────────────────────────────────────────────────────────────── */
-.asbiq-setup {
-  background: radial-gradient(ellipse at 50% -10%, #2d0a28 0%, var(--bg) 65%);
+/* ══════════════════════════════════════════════════════════════════════════
+   اسبقهم — Electric Speed Theme
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── CSS vars scoped to Asbiqhum pages ────────────────────────────────────── */
+.asbiq-setup, .asbiq-lobby, .asbiq-question, .asbiq-result, .asbiq-gameover {
+  --elec:        #00d4ff;
+  --elec-dark:   #0099cc;
+  --elec-dim:    rgba(0,212,255,0.12);
+  --elec-border: rgba(0,212,255,0.28);
+  --elec-glow:   rgba(0,212,255,0.45);
+  --navy:        #060c18;
+  --navy-mid:    #0d1628;
+  --navy-light:  #162038;
+  --navy-card:   rgba(13,22,40,0.95);
+  --gold:        #fbbf24;
+  --gold-dim:    rgba(251,191,36,0.14);
+  --gold-border: rgba(251,191,36,0.32);
+  --success:     #22c55e;
+  --success-dim: rgba(34,197,94,0.14);
+  --danger:      #ef4444;
+  --danger-dim:  rgba(239,68,68,0.14);
 }
 
-.asbiq-setup .setup-card h1 { color: var(--accent); }
+/* ── Player palette (up to 8 players) ────────────────────────────────────── */
+.player-buzz:nth-child(1) { --pc: #00d4ff; --pc-dim: rgba(0,212,255,0.14); }
+.player-buzz:nth-child(2) { --pc: #f97316; --pc-dim: rgba(249,115,22,0.14); }
+.player-buzz:nth-child(3) { --pc: #22c55e; --pc-dim: rgba(34,197,94,0.14); }
+.player-buzz:nth-child(4) { --pc: #a855f7; --pc-dim: rgba(168,85,247,0.14); }
+.player-buzz:nth-child(5) { --pc: #ef4444; --pc-dim: rgba(239,68,68,0.14); }
+.player-buzz:nth-child(6) { --pc: #fbbf24; --pc-dim: rgba(251,191,36,0.14); }
+.player-buzz:nth-child(7) { --pc: #ec4899; --pc-dim: rgba(236,72,153,0.14); }
+.player-buzz:nth-child(8) { --pc: #84cc16; --pc-dim: rgba(132,204,22,0.14); }
 
-/* ── Lobby ─────────────────────────────────────────────────────────────── */
-.asbiq-lobby { background: radial-gradient(ellipse at top, #1a1a2e, var(--bg) 70%); }
+/* ══════════════════════════════════════════════════════════════════════════
+   SETUP & MODE SELECT
+   ══════════════════════════════════════════════════════════════════════════ */
 
-/* ── Question screen ───────────────────────────────────────────────────── */
+.asbiq-setup {
+  background:
+    radial-gradient(ellipse at 30% 20%, rgba(0,212,255,0.06) 0%, transparent 55%),
+    radial-gradient(ellipse at 70% 80%, rgba(0,153,204,0.05) 0%, transparent 50%),
+    linear-gradient(180deg, var(--navy) 0%, #040810 100%);
+}
+
+/* Title flash line above game title */
+.asbiq-setup .setup-card h1 {
+  color: var(--elec);
+  text-shadow: 0 0 24px var(--elec-glow);
+}
+
+.asbiq-setup .setup-icon {
+  filter: drop-shadow(0 0 20px var(--elec-glow));
+  animation: iconPulse 2.4s ease-in-out infinite;
+}
+
+@keyframes iconPulse {
+  0%, 100% { filter: drop-shadow(0 0 16px var(--elec-glow)); }
+  50%       { filter: drop-shadow(0 0 36px var(--elec-glow)) drop-shadow(0 0 60px rgba(0,212,255,0.2)); }
+}
+
+/* Mode buttons */
+.asbiq-setup .mode-btn.btn-primary {
+  background: linear-gradient(135deg, var(--elec-dark), #006b8f);
+  color: #fff;
+  border: 1px solid var(--elec-border);
+  box-shadow: 0 4px 20px var(--elec-dim);
+}
+.asbiq-setup .mode-btn.btn-primary:hover:not(:disabled) {
+  background: linear-gradient(135deg, var(--elec), var(--elec-dark));
+  box-shadow: 0 6px 30px var(--elec-glow);
+  transform: translateY(-2px);
+}
+
+/* Back button inside asbiq pages */
+.asbiq-setup .back-btn,
+.asbiq-lobby .back-btn {
+  background: rgba(0,212,255,0.07);
+  border-color: var(--elec-border);
+  color: var(--elec);
+}
+.asbiq-setup .back-btn:hover,
+.asbiq-lobby .back-btn:hover {
+  background: rgba(0,212,255,0.15);
+  border-color: var(--elec);
+}
+
+/* Setup card override */
+.asbiq-setup .setup-card {
+  background: var(--navy-card);
+  border: 1px solid var(--elec-border);
+  border-radius: 18px;
+  padding: 32px 28px;
+  box-shadow: 0 0 48px rgba(0,212,255,0.08), 0 8px 40px rgba(0,0,0,0.5);
+}
+
+/* Input focus override */
+.asbiq-setup .input-field:focus {
+  border-color: var(--elec);
+  box-shadow: 0 0 0 3px var(--elec-dim);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   LOBBY
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.asbiq-lobby {
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(0,212,255,0.07) 0%, transparent 60%),
+    linear-gradient(180deg, var(--navy) 0%, #040810 100%);
+}
+
+.asbiq-lobby .lobby-card {
+  background: var(--navy-card);
+  border: 1px solid var(--elec-border);
+  box-shadow: 0 0 48px rgba(0,212,255,0.08), 0 8px 40px rgba(0,0,0,0.5);
+  border-radius: 18px;
+}
+
+.asbiq-lobby .lobby-card h2 {
+  color: var(--elec);
+  text-shadow: 0 0 16px var(--elec-glow);
+}
+
+.asbiq-lobby .room-code {
+  color: var(--gold);
+  text-shadow: 0 0 12px rgba(251,191,36,0.4);
+}
+
+.asbiq-lobby .room-code-display {
+  background: rgba(0,0,0,0.35);
+  border-color: rgba(251,191,36,0.22);
+}
+
+.asbiq-lobby .player-item {
+  background: rgba(0,212,255,0.06);
+  border-color: var(--elec-border);
+  color: #e0f7ff;
+}
+
+.asbiq-lobby .start-btn {
+  background: linear-gradient(135deg, var(--elec-dark), #006b8f) !important;
+  color: #fff !important;
+  border: 1px solid var(--elec-border) !important;
+  box-shadow: 0 4px 20px var(--elec-dim) !important;
+}
+.asbiq-lobby .start-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, var(--elec), var(--elec-dark)) !important;
+  box-shadow: 0 6px 30px var(--elec-glow) !important;
+  transform: translateY(-2px) !important;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   QUESTION SCREEN
+   ══════════════════════════════════════════════════════════════════════════ */
+
 .asbiq-question {
-  background: radial-gradient(ellipse at 50% -5%, #0a1a2e 0%, var(--bg) 70%);
-  gap: 20px;
+  background:
+    radial-gradient(ellipse at 50% -5%, rgba(0,212,255,0.08) 0%, transparent 55%),
+    linear-gradient(180deg, var(--navy) 0%, #040810 100%);
+  gap: 18px;
   padding: 20px;
   justify-content: flex-start;
   padding-top: 24px;
 }
 
-.question-header {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  width: 100%;
-  max-width: 640px;
-  justify-content: space-between;
-  padding: 12px 16px;
-  background: var(--surface);
-  border-radius: var(--radius);
-  border: 1px solid var(--border);
+/* Question header bar */
+.asbiq-question .question-header {
+  background: var(--navy-card);
+  border-color: var(--elec-border);
+  box-shadow: 0 2px 16px rgba(0,212,255,0.08);
 }
 
-.q-counter { font-size: 0.9rem; color: var(--muted); font-weight: 700; }
-
-.q-category {
-  font-size: 0.8rem;
-  padding: 4px 12px;
-  background: var(--blue-dim);
-  border: 1px solid rgba(91,154,255,0.3);
-  color: var(--blue);
-  border-radius: 20px;
-  font-weight: 700;
+.asbiq-question .q-counter {
+  color: var(--elec);
+  font-weight: 800;
+  font-size: 0.85rem;
+  letter-spacing: 0.5px;
 }
 
-.question-card {
-  width: 100%;
-  max-width: 640px;
-  text-align: center;
-  padding: 28px;
-  border: 1px solid rgba(255,255,255,0.08);
-  background: linear-gradient(135deg, var(--surface), var(--surface2));
+.asbiq-question .q-category {
+  background: var(--elec-dim);
+  border-color: var(--elec-border);
+  color: var(--elec);
 }
 
-/* ── Buzz button (room mode) ───────────────────────────────────────────── */
-.buzz-btn {
-  background: linear-gradient(135deg, var(--accent), #f97316);
-  color: white;
-  font-size: 1.6rem;
-  font-weight: 900;
-  padding: 22px 64px;
-  border-radius: 50px;
-  box-shadow: 0 8px 32px rgba(233,69,96,0.4);
-  animation: pulseGlow 2s ease-in-out infinite;
-}
-.buzz-btn:hover:not(:disabled) {
-  transform: scale(1.06);
-  box-shadow: 0 12px 48px rgba(233,69,96,0.65);
-}
-@keyframes pulseGlow {
-  0%, 100% { box-shadow: 0 8px 32px rgba(233,69,96,0.4); }
-  50%       { box-shadow: 0 8px 52px rgba(233,69,96,0.75); }
+/* Question card */
+.asbiq-question .question-card {
+  background: var(--navy-card);
+  border: 1px solid var(--elec-border);
+  box-shadow: 0 4px 24px rgba(0,212,255,0.08), 0 8px 32px rgba(0,0,0,0.4);
+  border-radius: 16px;
 }
 
-/* ── Local buzz grid ───────────────────────────────────────────────────── */
+.asbiq-question .question-text {
+  color: #e8f4ff;
+  font-size: 1.4rem;
+  line-height: 1.7;
+}
+
+/* ── Local buzz grid ─────────────────────────────────────────────────────── */
 .local-buzz-buttons {
   width: 100%;
   max-width: 640px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
 }
+
 .local-buzz-hint {
   text-align: center;
-  color: var(--muted);
+  color: var(--elec);
   font-size: 0.9rem;
-  font-weight: 600;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  opacity: 0.85;
 }
+
 .buzz-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 12px;
 }
+
+/* Per-player colored buzz buttons */
 .player-buzz {
-  background: linear-gradient(135deg, var(--surface3), var(--surface));
-  border: 2px solid rgba(233,69,96,0.3);
-  color: var(--text);
+  background: linear-gradient(135deg, rgba(13,22,40,0.9), rgba(6,12,24,0.95));
+  border: 2px solid var(--pc, rgba(0,212,255,0.3));
+  color: var(--pc, var(--elec));
   font-size: 1.05rem;
-  font-weight: 700;
-  padding: 18px 12px;
-  border-radius: var(--radius);
-  transition: all 0.15s;
+  font-weight: 800;
+  padding: 20px 12px;
+  border-radius: 14px;
+  transition: all 0.18s;
+  position: relative;
+  overflow: hidden;
+  text-shadow: 0 0 8px var(--pc, var(--elec-glow));
+}
+.player-buzz::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--pc-dim, var(--elec-dim));
+  opacity: 0;
+  transition: opacity 0.18s;
 }
 .player-buzz:hover:not(:disabled) {
-  border-color: var(--accent);
-  background: var(--accent-dim);
-  transform: translateY(-2px);
-  box-shadow: 0 4px 20px rgba(233,69,96,0.2);
+  border-color: var(--pc, var(--elec));
+  box-shadow: 0 6px 28px var(--pc-dim, var(--elec-dim)), inset 0 0 20px var(--pc-dim, var(--elec-dim));
+  transform: translateY(-3px) scale(1.02);
+}
+.player-buzz:hover:not(:disabled)::before { opacity: 1; }
+.player-buzz:active:not(:disabled) { transform: scale(0.95) !important; }
+
+/* ── Room-mode buzz button ───────────────────────────────────────────────── */
+.buzz-btn {
+  background: linear-gradient(135deg, var(--elec-dark), #006b8f);
+  color: white;
+  font-size: 1.7rem;
+  font-weight: 900;
+  padding: 24px 72px;
+  border-radius: 50px;
+  border: 2px solid var(--elec-border);
+  box-shadow: 0 8px 36px var(--elec-dim), 0 0 0 0 var(--elec-glow);
+  animation: buzzPulse 2s ease-in-out infinite;
+  letter-spacing: 1px;
+}
+.buzz-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, var(--elec), var(--elec-dark));
+  transform: scale(1.07);
+  box-shadow: 0 12px 56px var(--elec-glow), 0 0 40px rgba(0,212,255,0.3);
 }
 
-/* ── Buzzed info ───────────────────────────────────────────────────────── */
+@keyframes buzzPulse {
+  0%, 100% { box-shadow: 0 8px 36px var(--elec-dim), 0 0 0 0 transparent; }
+  50%       { box-shadow: 0 8px 52px var(--elec-glow), 0 0 28px rgba(0,212,255,0.2); }
+}
+
+/* ── Buzzed info ─────────────────────────────────────────────────────────── */
 .buzzed-info {
   width: 100%;
   max-width: 640px;
@@ -118,67 +287,79 @@
 }
 
 .buzzed-banner {
-  background: linear-gradient(135deg, var(--surface), var(--surface3));
+  background: linear-gradient(135deg, var(--navy-mid), var(--navy-light));
   border: 2px solid var(--gold);
-  border-radius: var(--radius);
+  border-radius: 14px;
   padding: 14px 24px;
   font-size: 1.2rem;
-  font-weight: 700;
+  font-weight: 800;
   color: var(--gold);
   text-align: center;
   width: 100%;
-  box-shadow: 0 0 20px rgba(251,191,36,0.2);
+  box-shadow: 0 0 24px var(--gold-dim), 0 4px 16px rgba(0,0,0,0.4);
+  text-shadow: 0 0 12px rgba(251,191,36,0.4);
 }
 
-/* ── Player list (setup) ───────────────────────────────────────────────── */
+/* ── Side scores ─────────────────────────────────────────────────────────── */
+.side-scores {
+  width: 100%;
+  max-width: 640px;
+}
+
+/* ── Player list (local setup) ───────────────────────────────────────────── */
 .player-item-removable { justify-content: space-between; }
+
 .remove-player-btn {
   background: none;
   border: none;
-  color: var(--accent);
+  color: var(--danger);
   cursor: pointer;
   font-size: 1.1rem;
   padding: 2px 6px;
   border-radius: 6px;
   transition: all 0.15s;
 }
-.remove-player-btn:hover { background: var(--accent-dim); }
+.remove-player-btn:hover { background: var(--danger-dim); }
 
-/* ── Side scores ───────────────────────────────────────────────────────── */
-.side-scores {
-  width: 100%;
-  max-width: 640px;
+/* ══════════════════════════════════════════════════════════════════════════
+   RESULT SCREEN
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.asbiq-result {
+  background:
+    radial-gradient(ellipse at 50% 10%, rgba(0,212,255,0.06) 0%, transparent 60%),
+    linear-gradient(180deg, var(--navy) 0%, #040810 100%);
+  gap: 20px;
 }
-
-/* ── Result screen ─────────────────────────────────────────────────────── */
-.asbiq-result { gap: 20px; }
 
 .result-banner {
   width: 100%;
   max-width: 520px;
-  padding: 20px 28px;
-  border-radius: var(--radius-lg);
+  padding: 22px 32px;
+  border-radius: 18px;
   font-size: 1.35rem;
   font-weight: 800;
   text-align: center;
 }
 .result-banner.correct {
-  background: var(--green-dim);
-  border: 2px solid var(--green);
-  color: var(--green);
-  box-shadow: 0 4px 24px rgba(34,197,94,0.2);
+  background: var(--success-dim);
+  border: 2px solid var(--success);
+  color: var(--success);
+  box-shadow: 0 4px 28px rgba(34,197,94,0.2);
+  text-shadow: 0 0 12px rgba(34,197,94,0.4);
 }
 .result-banner.wrong {
-  background: var(--accent-dim);
-  border: 2px solid var(--accent);
-  color: var(--accent);
-  box-shadow: 0 4px 24px rgba(233,69,96,0.2);
+  background: var(--danger-dim);
+  border: 2px solid var(--danger);
+  color: var(--danger);
+  box-shadow: 0 4px 28px rgba(239,68,68,0.2);
 }
 .result-banner.timeout {
   background: var(--gold-dim);
   border: 2px solid var(--gold);
   color: var(--gold);
-  box-shadow: 0 4px 24px rgba(251,191,36,0.2);
+  box-shadow: 0 4px 28px rgba(251,191,36,0.2);
+  text-shadow: 0 0 12px rgba(251,191,36,0.4);
 }
 
 .correct-answer {
@@ -187,26 +368,112 @@
   justify-content: center;
   gap: 12px;
   font-size: 1rem;
-  color: var(--muted);
+  color: #8899bb;
   width: 100%;
   max-width: 520px;
   padding: 16px 20px;
-  background: var(--surface);
-  border-radius: var(--radius);
-  border: 1px solid var(--border);
+  background: var(--navy-card);
+  border-radius: 14px;
+  border: 1px solid var(--elec-border);
 }
-.correct-answer strong { font-size: 1.15rem; color: var(--text); }
+.correct-answer strong {
+  font-size: 1.15rem;
+  color: #e8f4ff;
+  font-weight: 700;
+}
 
-.result-scores { width: 100%; max-width: 520px; display: flex; flex-direction: column; gap: 12px; }
-.result-scores h3 { font-size: 0.9rem; color: var(--muted); }
-.next-hint { color: var(--muted); font-size: 0.9rem; }
+.result-scores {
+  width: 100%;
+  max-width: 520px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: var(--navy-card);
+  border: 1px solid var(--elec-border);
+  border-radius: 14px;
+}
+.result-scores h3 { font-size: 0.88rem; color: var(--elec); font-weight: 700; }
 
-/* ── Gameover ──────────────────────────────────────────────────────────── */
-.asbiq-gameover { gap: 24px; }
+.next-hint { color: var(--elec); font-size: 0.9rem; opacity: 0.7; }
 
-/* ── Responsive ────────────────────────────────────────────────────────── */
+/* ── Next question button ────────────────────────────────────────────────── */
+.asbiq-result .btn-primary {
+  background: linear-gradient(135deg, var(--elec-dark), #006b8f);
+  color: #fff;
+  border: 1px solid var(--elec-border);
+  box-shadow: 0 4px 20px var(--elec-dim);
+}
+.asbiq-result .btn-primary:hover:not(:disabled) {
+  background: linear-gradient(135deg, var(--elec), var(--elec-dark));
+  box-shadow: 0 6px 30px var(--elec-glow);
+  transform: translateY(-2px);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   GAMEOVER SCREEN
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.asbiq-gameover {
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(251,191,36,0.07) 0%, transparent 55%),
+    radial-gradient(ellipse at 50% 100%, rgba(0,212,255,0.05) 0%, transparent 50%),
+    linear-gradient(180deg, var(--navy) 0%, #040810 100%);
+  gap: 24px;
+}
+
+.asbiq-gameover .gameover-hero {
+  text-align: center;
+}
+.asbiq-gameover .gameover-trophy {
+  font-size: 96px;
+  line-height: 1;
+  filter: drop-shadow(0 0 24px rgba(251,191,36,0.55)) drop-shadow(0 0 56px rgba(251,191,36,0.25));
+  animation: trophyFloat 3s ease-in-out infinite;
+}
+@keyframes trophyFloat {
+  0%, 100% { transform: translateY(0);   filter: drop-shadow(0 0 24px rgba(251,191,36,0.55)); }
+  50%       { transform: translateY(-8px); filter: drop-shadow(0 0 40px rgba(251,191,36,0.75)); }
+}
+
+.asbiq-gameover .gameover-hero h1 {
+  font-size: 2.5rem;
+  font-weight: 900;
+  color: var(--gold);
+  margin-top: 14px;
+  text-shadow: 0 0 20px rgba(251,191,36,0.4);
+}
+
+.asbiq-gameover .final-scores {
+  background: var(--navy-card);
+  border: 1px solid var(--elec-border);
+  border-radius: 16px;
+}
+.asbiq-gameover .final-scores h3 {
+  color: var(--elec);
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+/* Gameover action buttons */
+.asbiq-gameover .btn-primary {
+  background: linear-gradient(135deg, var(--elec-dark), #006b8f);
+  color: #fff;
+  border: 1px solid var(--elec-border);
+  box-shadow: 0 4px 20px var(--elec-dim);
+}
+.asbiq-gameover .btn-primary:hover:not(:disabled) {
+  background: linear-gradient(135deg, var(--elec), var(--elec-dark));
+  box-shadow: 0 6px 30px var(--elec-glow);
+  transform: translateY(-2px);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   RESPONSIVE
+   ══════════════════════════════════════════════════════════════════════════ */
+
 @media (max-width: 480px) {
   .buzz-grid { grid-template-columns: 1fr; }
   .question-text { font-size: 1.15rem; }
-  .buzz-btn { padding: 18px 40px; font-size: 1.4rem; }
+  .buzz-btn { padding: 20px 44px; font-size: 1.45rem; }
+  .asbiq-setup .setup-card { padding: 24px 18px; }
 }
