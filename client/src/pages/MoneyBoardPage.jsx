@@ -19,31 +19,14 @@ const STEAL_TIME  = 15;
 const TEAM_NAMES  = { A: 'الفريق الأول', B: 'الفريق الثاني' };
 const TEAM_COLORS = { A: 'team-a', B: 'team-b' };
 
-// ── Super Powers ──────────────────────────────────────────────────────────────
+// ── Super Powers (matching asbghm.com) ───────────────────────────────────────
 const SUPER_POWERS = [
-  { id: 'fifty',    icon: '50/50', name: 'خمسون خمسون',  desc: 'احذف إجابتين خاطئتين' },
-  { id: 'audience', icon: '👥',   name: 'اسأل الجمهور', desc: 'شاهد نسب إجابات الجمهور' },
-  { id: 'friend',   icon: '📞',   name: 'اتصل بصديق',  desc: '30 ثانية للتشاور مع صديق' },
+  { id: 'double', icon: '2x',  name: 'مضاعفة النقاط', desc: 'ضاعف نقاطك إذا أجبت صح' },
+  { id: 'two',    icon: '✌️',  name: 'إجابتين',        desc: 'فرصتان للإجابة بدل واحدة' },
+  { id: 'hafra',  icon: '🔄',  name: 'الحفرة',          desc: 'أجب صح وانقص نقاط خصمك' },
+  { id: 'friend', icon: '📞',  name: 'اتصل بصديق',     desc: '30 ثانية للتشاور مع صديق' },
+  { id: 'block',  icon: '🚫',  name: 'بلوك',            desc: 'احجب وسيلة عشوائية من الخصم' },
 ];
-
-function genAudiencePoll(options, correctAnswer) {
-  const correctIdx = options.indexOf(correctAnswer);
-  const correctPct = 40 + Math.floor(Math.random() * 31); // 40–70%
-  const remaining  = 100 - correctPct;
-  const others     = options.map((_, i) => i).filter(i => i !== correctIdx);
-  let splits = others.map(() => Math.floor(Math.random() * remaining));
-  const sum = splits.reduce((a, b) => a + b, 0) || 1;
-  splits = splits.map(v => Math.round(v / sum * remaining));
-  // Adjust for rounding to sum to 100
-  const diff = remaining - splits.reduce((a, b) => a + b, 0);
-  splits[0] = (splits[0] || 0) + diff;
-  const result = options.map((_, i) => (i === correctIdx ? correctPct : 0));
-  let j = 0;
-  for (let i = 0; i < options.length; i++) {
-    if (i !== correctIdx) { result[i] = splits[j++] ?? 0; }
-  }
-  return result; // array of percentages per option index
-}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -93,12 +76,14 @@ function useLocalGame() {
 
   // ── Super Powers state ─────────────────────────────────────────────────
   const [superPowers, setSuperPowers] = useState({
-    A: ['fifty', 'audience', 'friend'],
-    B: ['fifty', 'audience', 'friend'],
+    A: ['double', 'two', 'hafra', 'friend', 'block'],
+    B: ['double', 'two', 'hafra', 'friend', 'block'],
   });
-  const [eliminatedOpts, setEliminatedOpts] = useState([]); // for 50/50
-  const [audiencePoll,   setAudiencePoll]   = useState(null); // % array
+  const [eliminatedOpts, setEliminatedOpts] = useState([]); // unused now but kept for safety
   const [friendTimer,    setFriendTimer]     = useState(false); // show timer overlay
+  const [isDoubled,      setIsDoubled]       = useState(false); // 2x active
+  const [isTwoAnswers,   setIsTwoAnswers]    = useState(false); // إجابتين active
+  const [isHafra,        setIsHafra]         = useState(false); // الحفرة active
 
   const totalCells = 18;
 
@@ -124,9 +109,11 @@ function useLocalGame() {
     setCount(0);
     setSelAns(null);
     setEliminatedOpts([]);
-    setAudiencePoll(null);
     setFriendTimer(false);
-    setSuperPowers({ A: ['fifty', 'audience', 'friend'], B: ['fifty', 'audience', 'friend'] });
+    setIsDoubled(false);
+    setIsTwoAnswers(false);
+    setIsHafra(false);
+    setSuperPowers({ A: ['double', 'two', 'hafra', 'friend', 'block'], B: ['double', 'two', 'hafra', 'friend', 'block'] });
     setScreen('game');
   };
 
@@ -148,18 +135,23 @@ function useLocalGame() {
       ...prev,
       [activeTeam]: prev[activeTeam].filter(p => p !== powerId),
     }));
-    const cell = board?.[activeCell?.colIdx]?.cells?.[activeCell?.rowIdx];
-    const opts  = cell?.question?.options || [];
-    const ans   = cell?.question?.answer || '';
-    if (powerId === 'fifty') {
-      // Eliminate 2 wrong options
-      const wrongIdxs = opts.map((o, i) => i).filter(i => opts[i] !== ans);
-      const toElim = wrongIdxs.sort(() => Math.random() - 0.5).slice(0, 2);
-      setEliminatedOpts(toElim);
-    } else if (powerId === 'audience') {
-      setAudiencePoll(genAudiencePoll(opts, ans));
+    if (powerId === 'double') {
+      setIsDoubled(true);
+    } else if (powerId === 'two') {
+      setIsTwoAnswers(true);
+    } else if (powerId === 'hafra') {
+      setIsHafra(true);
     } else if (powerId === 'friend') {
       setFriendTimer(true);
+    } else if (powerId === 'block') {
+      // Remove a random available power from the opponent
+      const opponent = activeTeam === 'A' ? 'B' : 'A';
+      setSuperPowers(prev => {
+        const oppPowers = prev[opponent] || [];
+        if (!oppPowers.length) return prev;
+        const toRemove = oppPowers[Math.floor(Math.random() * oppPowers.length)];
+        return { ...prev, [opponent]: oppPowers.filter(p => p !== toRemove) };
+      });
     }
   };
 
@@ -173,6 +165,11 @@ function useLocalGame() {
     setSelAns(null);
     setPhase('answer');
     setTimer(true);
+    setIsDoubled(false);
+    setIsTwoAnswers(false);
+    setIsHafra(false);
+    setEliminatedOpts([]);
+    setFriendTimer(false);
     setScreen('question');
   };
 
@@ -196,11 +193,18 @@ function useLocalGame() {
 
   function _resolveAnswer(isCorrect, cell) {
     clearTimeout(timeoutRef.current);
+    const resetPowers = () => { setIsDoubled(false); setIsTwoAnswers(false); setIsHafra(false); setEliminatedOpts([]); setFriendTimer(false); };
+    const clearAndReturn = () => { setScreen('game'); setPhase('pick'); setActiveCell(null); setResultInfo(null); setSelAns(null); resetPowers(); };
+
     if (isCorrect) {
-      const winner = activeTeam;
+      const winner  = activeTeam;
+      const earned  = isDoubled ? cell.points * 2 : cell.points;
+      const opponent = winner === 'A' ? 'B' : 'A';
+      // الحفرة: also deduct from opponent
+      const oppDeduct = isHafra ? cell.points : 0;
       const newTeams = {
-        ...teams,
-        [winner]: { money: teams[winner].money + cell.points },
+        A: { money: Math.max(0, teams.A.money + (winner === 'A' ? earned : -oppDeduct)) },
+        B: { money: Math.max(0, teams.B.money + (winner === 'B' ? earned : -oppDeduct)) },
       };
       const newBoard = board.map((col, ci) => ({
         ...col,
@@ -214,25 +218,34 @@ function useLocalGame() {
       setTeams(newTeams);
       setBoard(newBoard);
       setCount(newCount);
-      setResultInfo({ isCorrect: true, winner, points: cell.points, correctAnswer: cell.question?.answer, teams: newTeams });
+      setResultInfo({ isCorrect: true, winner, points: earned, hafra: isHafra && oppDeduct > 0, hafraPoints: oppDeduct, correctAnswer: cell.question?.answer, teams: newTeams });
       setPhase('result');
-      setTurn(winner); // winner picks next
+      setTurn(winner);
+      resetPowers();
       if (newCount >= totalCells) {
         timeoutRef.current = setTimeout(() => setScreen('gameover'), 2200);
       } else {
-        timeoutRef.current = setTimeout(() => { setScreen('game'); setPhase('pick'); setActiveCell(null); setResultInfo(null); setSelAns(null); setEliminatedOpts([]); setAudiencePoll(null); setFriendTimer(false); }, 2200);
+        timeoutRef.current = setTimeout(clearAndReturn, 2200);
       }
     } else {
-      if (phase === 'answer') {
-        // Offer steal
+      if (phase === 'answer' && isTwoAnswers) {
+        // إجابتين: first wrong → give another try (no steal)
+        setIsTwoAnswers(false); // consume the two-answers bonus
+        setSelAns(null);
+        setTimer(true);
+        // stay on question screen in answer phase
+      } else if (phase === 'answer') {
+        // Offer steal to opponent
         const stealTeam = activeTeam === 'A' ? 'B' : 'A';
         setActiveTeam(stealTeam);
         setPhase('steal');
         setSelAns(null);
         setTimer(true);
-        setScreen('question'); // stay on question screen, now in steal mode
+        setIsDoubled(false);
+        setIsHafra(false);
+        setScreen('question');
       } else {
-        // Steal also wrong — no one wins, original team picks next
+        // Steal also wrong — no one wins
         const newBoard = board.map((col, ci) => ({
           ...col,
           cells: col.cells.map((c, ri) =>
@@ -246,11 +259,12 @@ function useLocalGame() {
         setCount(newCount);
         setResultInfo({ isCorrect: false, winner: null, points: 0, correctAnswer: cell.question?.answer, teams });
         setPhase('result');
-        setTurn(originalTeam); // original team picks next
+        setTurn(originalTeam);
+        resetPowers();
         if (newCount >= totalCells) {
           timeoutRef.current = setTimeout(() => setScreen('gameover'), 2200);
         } else {
-          timeoutRef.current = setTimeout(() => { setScreen('game'); setPhase('pick'); setActiveCell(null); setResultInfo(null); setSelAns(null); setEliminatedOpts([]); setAudiencePoll(null); setFriendTimer(false); }, 2200);
+          timeoutRef.current = setTimeout(clearAndReturn, 2200);
         }
       }
     }
@@ -290,8 +304,8 @@ function useLocalGame() {
     submitAnswer, timeUp, timerRunning, selectedAnswer,
     resultInfo, reset, answeredCount, totalCells,
     // Super powers
-    superPowers, useSuperPower, eliminatedOpts, audiencePoll,
-    friendTimer, setFriendTimer,
+    superPowers, useSuperPower, eliminatedOpts,
+    friendTimer, setFriendTimer, isDoubled, isTwoAnswers, isHafra,
     // Moderator
     adjustScore,
   };
@@ -483,19 +497,33 @@ export default function MoneyBoardPage() {
             <div className="steal-banner pop-in">⚡ فرصة السرقة! — {teamName}</div>
           )}
 
+          {/* Active power indicators */}
+          {(local.isDoubled || local.isTwoAnswers || local.isHafra) && (
+            <div className="active-powers-bar pop-in">
+              {local.isDoubled   && <span className="active-power-tag double-tag">2x مضاعفة النقاط</span>}
+              {local.isTwoAnswers && <span className="active-power-tag two-tag">✌️ إجابتين</span>}
+              {local.isHafra    && <span className="active-power-tag hafra-tag">🔄 الحفرة مفعّلة</span>}
+            </div>
+          )}
+
           {/* Super Powers bar */}
           {!isSteal && (
             <div className="super-powers-bar">
               <span className="sp-label">قوى {teamName}:</span>
               {SUPER_POWERS.map(sp => {
                 const available = teamPowers.includes(sp.id);
+                const alreadyActive =
+                  (sp.id === 'double' && local.isDoubled) ||
+                  (sp.id === 'two'    && local.isTwoAnswers) ||
+                  (sp.id === 'hafra'  && local.isHafra);
                 return (
                   <button key={sp.id}
-                    className={`sp-btn ${available ? '' : 'sp-used'}`}
+                    className={`sp-btn sp-${sp.id} ${!available ? 'sp-used' : ''} ${alreadyActive ? 'sp-active' : ''}`}
                     title={sp.name + ' — ' + sp.desc}
-                    onClick={() => available && local.selectedAnswer === null && local.useSuperPower(sp.id)}
-                    disabled={!available || local.selectedAnswer !== null}>
-                    {sp.icon} <span className="sp-name">{sp.name}</span>
+                    onClick={() => available && !alreadyActive && local.selectedAnswer === null && local.useSuperPower(sp.id)}
+                    disabled={!available || alreadyActive || local.selectedAnswer !== null}>
+                    <span className="sp-icon">{sp.icon}</span>
+                    <span className="sp-name">{sp.name}</span>
                   </button>
                 );
               })}
@@ -510,39 +538,20 @@ export default function MoneyBoardPage() {
             </div>
           )}
 
-          {/* Audience poll */}
-          {local.audiencePoll && (
-            <div className="audience-poll pop-in">
-              <div className="ap-title">👥 نتائج الجمهور:</div>
-              {opts.map((opt, i) => (
-                <div key={i} className="ap-row">
-                  <span className="ap-opt">{opt}</span>
-                  <div className="ap-bar-wrap">
-                    <div className="ap-bar" style={{ width: `${local.audiencePoll[i] || 0}%` }} />
-                  </div>
-                  <span className="ap-pct">{local.audiencePoll[i] || 0}%</span>
-                </div>
-              ))}
-            </div>
-          )}
-
           <div className="question-card card pop-in">
             {catName && <p className="question-category-tag">{catName}</p>}
             <p className="question-text">{local.currentQuestion?.text}</p>
           </div>
 
           <div className="options-grid">
-            {opts.map((opt, i) => {
-              const elim = local.eliminatedOpts.includes(i);
-              return (
-                <button key={i}
-                  className={`option-btn ${local.selectedAnswer === i ? 'answered' : ''} ${elim ? 'eliminated' : ''}`}
-                  onClick={() => !elim && local.submitAnswer(i)}
-                  disabled={local.selectedAnswer !== null || elim}>
-                  {opt}
-                </button>
-              );
-            })}
+            {opts.map((opt, i) => (
+              <button key={i}
+                className={`option-btn ${local.selectedAnswer === i ? 'answered' : ''}`}
+                onClick={() => local.submitAnswer(i)}
+                disabled={local.selectedAnswer !== null}>
+                {opt}
+              </button>
+            ))}
           </div>
         </div>
       );
@@ -834,7 +843,7 @@ function ResultFlash({ info, teamNames }) {
   return (
     <div className={`result-flash pop-in ${info.isCorrect ? 'correct' : 'wrong'}`}>
       {info.isCorrect
-        ? `✅ ${winnerName} — +${info.points.toLocaleString('ar-SA')} ريال`
+        ? <>✅ {winnerName} — +{info.points.toLocaleString('ar-SA')} ريال{info.hafra ? ` 🔄 −${info.hafraPoints} من الخصم` : ''}</>
         : info.correctAnswer
           ? `❌ إجابة خاطئة — الصواب: ${info.correctAnswer}`
           : '❌ إجابة خاطئة'

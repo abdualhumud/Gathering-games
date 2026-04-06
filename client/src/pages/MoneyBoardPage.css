@@ -201,7 +201,8 @@
   gap: 4px;
   background: #000;
   padding: 4px;
-  border-radius: 6px;
+  border-radius: 8px;
+  box-shadow: 0 8px 48px rgba(0,0,0,0.7);
 }
 
 .mb-board-row {
@@ -212,7 +213,7 @@
 
 /* Category header cells */
 .mb-header-cell {
-  background: #06068c;
+  background: #2e2ea8;
   color: #fff;
   text-align: center;
   padding: 12px 6px;
@@ -225,14 +226,14 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  text-shadow: 1px 1px 4px rgba(0,0,0,0.8);
+  text-shadow: 1px 1px 4px rgba(0,0,0,0.6);
   letter-spacing: 0.02em;
 }
 
 /* Money cells */
 .mb-cell {
   position: relative;
-  background: #06068c;
+  background: #2e2ea8;
   border: none;
   border-radius: 4px;
   min-height: 80px;
@@ -247,24 +248,24 @@
 }
 
 .mb-cell.pickable:hover {
-  background: #1414c8;
+  background: #4040cc;
   transform: scale(1.03) translateY(-2px);
-  box-shadow: 0 4px 20px rgba(0,0,0,0.6);
+  box-shadow: 0 4px 24px rgba(0,0,0,0.6);
   z-index: 2;
 }
 
 .mb-cell.active-cell {
-  background: #1414c8;
-  outline: 3px solid var(--gold);
+  background: #4040cc;
+  outline: 3px solid #f0c040;
   outline-offset: -3px;
-  box-shadow: 0 0 18px rgba(240,192,64,0.45);
+  box-shadow: 0 0 20px rgba(240,192,64,0.5);
 }
 
 /* Answered states */
 .mb-cell.answered { cursor: default; }
-.mb-cell.answered.winner-A  { background: #04044e; opacity: 0.7; }
-.mb-cell.answered.winner-B  { background: #3a1400; opacity: 0.7; }
-.mb-cell.answered.winner-none { background: #0a0a0a; opacity: 0.5; }
+.mb-cell.answered.winner-A  { background: #0f0f6a; opacity: 0.65; }
+.mb-cell.answered.winner-B  { background: #4a1800; opacity: 0.65; }
+.mb-cell.answered.winner-none { background: #111; opacity: 0.5; }
 .mb-cell:disabled { cursor: not-allowed; }
 
 /* Cell text */
@@ -360,13 +361,45 @@
   border: 1px solid rgba(255,107,53,0.4);
 }
 
+/* ── Active power indicator bar ───────────────────────────────────────── */
+.active-powers-bar {
+  width: 100%;
+  max-width: 660px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.active-power-tag {
+  padding: 5px 14px;
+  border-radius: 20px;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+.active-power-tag.double-tag {
+  background: rgba(251,191,36,0.2);
+  border: 1px solid var(--gold);
+  color: var(--gold);
+}
+.active-power-tag.two-tag {
+  background: rgba(34,197,94,0.18);
+  border: 1px solid var(--green);
+  color: var(--green);
+}
+.active-power-tag.hafra-tag {
+  background: rgba(249,115,22,0.18);
+  border: 1px solid var(--orange);
+  color: var(--orange);
+}
+
 /* ── Super powers bar ─────────────────────────────────────────────────── */
 .super-powers-bar {
   width: 100%;
   max-width: 660px;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
   flex-wrap: wrap;
   padding: 10px 16px;
   background: var(--surface);
@@ -375,7 +408,7 @@
 }
 
 .sp-label {
-  font-size: 0.82rem;
+  font-size: 0.8rem;
   color: var(--muted);
   font-weight: 700;
   white-space: nowrap;
@@ -384,32 +417,42 @@
 .sp-btn {
   display: flex;
   align-items: center;
-  gap: 5px;
-  padding: 6px 13px;
-  border-radius: 20px;
-  background: linear-gradient(135deg, var(--gold), #d97706);
-  color: #1a0a00;
-  font-size: 0.82rem;
-  font-weight: 800;
-  border: none;
+  gap: 4px;
+  padding: 5px 11px;
+  border-radius: 18px;
+  background: var(--surface2);
+  border: 1.5px solid var(--border);
+  color: var(--text);
+  font-size: 0.8rem;
+  font-weight: 700;
   cursor: pointer;
   transition: all 0.18s;
-  box-shadow: 0 2px 8px rgba(251,191,36,0.25);
 }
-.sp-btn:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 16px rgba(251,191,36,0.45);
+/* Per-power colors */
+.sp-btn.sp-double { border-color: rgba(251,191,36,0.5); color: var(--gold); }
+.sp-btn.sp-double:hover:not(:disabled) { background: var(--gold-dim); border-color: var(--gold); }
+.sp-btn.sp-two    { border-color: rgba(34,197,94,0.5);  color: var(--green); }
+.sp-btn.sp-two:hover:not(:disabled)    { background: var(--green-dim); border-color: var(--green); }
+.sp-btn.sp-hafra  { border-color: rgba(249,115,22,0.5); color: var(--orange); }
+.sp-btn.sp-hafra:hover:not(:disabled)  { background: var(--orange-dim); border-color: var(--orange); }
+.sp-btn.sp-friend { border-color: rgba(91,154,255,0.5); color: var(--blue); }
+.sp-btn.sp-friend:hover:not(:disabled) { background: var(--blue-dim); border-color: var(--blue); }
+.sp-btn.sp-block  { border-color: rgba(233,69,96,0.5);  color: var(--accent); }
+.sp-btn.sp-block:hover:not(:disabled)  { background: var(--accent-dim); border-color: var(--accent); }
+
+.sp-btn.sp-active {
+  box-shadow: 0 0 0 2px currentColor;
+  font-weight: 900;
 }
 .sp-btn.sp-used {
-  background: var(--surface2);
-  color: var(--muted);
-  box-shadow: none;
-  opacity: 0.45;
+  opacity: 0.28;
   cursor: not-allowed;
   text-decoration: line-through;
 }
+.sp-btn:hover:not(:disabled) { transform: translateY(-1px); }
 
-.sp-name { font-size: 0.78rem; }
+.sp-icon { font-size: 0.85rem; }
+.sp-name { font-size: 0.76rem; }
 
 /* ── Friend timer banner ──────────────────────────────────────────────── */
 .friend-timer-banner {
