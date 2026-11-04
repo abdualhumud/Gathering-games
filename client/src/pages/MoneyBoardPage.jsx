@@ -1,17 +1,17 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { socket } from '../socket';
-import { questions as allQuestions } from '../questions';
+import { questions as allQuestions, categoryCounts, pickFresh, markSeen, shuffle } from '../questions';
 import Timer from '../components/Timer';
 import './MoneyBoardPage.css';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-const VALID_CATEGORIES = [
-  'جغرافيا عربية', 'حيوانات وطبيعة', 'ثقافة وفنون', 'تاريخ عالمي',
-  'رياضة وأولمبياد', 'أدب عربي ولغة', 'جغرافيا عالمية', 'تكنولوجيا وحاسوب',
-  'فيزياء وكيمياء', 'طعام ومطبخ', 'قرآن ومعرفة إسلامية', 'فلك وعلوم الفضاء',
-  'معلومات عامة', 'أحياء وجسم الإنسان', 'رياضيات',
-];
+// Every category in the bank with enough questions for a column (generated
+// from server/questions*.js, so client and server always agree).
+const MIN_PER_CATEGORY = 6;
+const VALID_CATEGORIES = categoryCounts
+  .filter(([, n]) => n >= MIN_PER_CATEGORY)
+  .map(([cat]) => cat);
 const POINTS    = [200, 400, 600];
 const DIFF_LABEL = ['سهل', 'متوسط', 'صعب'];
 const ANSWER_TIME = 30;
@@ -31,28 +31,30 @@ const SUPER_POWERS = [
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 // Pre-computed question counts per category (used in setup UI)
-const CATEGORY_Q_COUNT = {};
-VALID_CATEGORIES.forEach(cat => {
-  CATEGORY_Q_COUNT[cat] = allQuestions.filter(q => q.category === cat).length;
-});
+const CATEGORY_Q_COUNT = Object.fromEntries(categoryCounts);
+const freshStats = () => ({ A: { correct: 0, steals: 0 }, B: { correct: 0, steals: 0 } });
 
+/**
+ * Builds the board: 3 different questions per category, preferring questions
+ * this device hasn't seen recently, with options shuffled (the correct answer
+ * is no longer always the first option).
+ */
 function buildLocalBoard(selectedCats) {
-  const fallbackPool = [...allQuestions].sort(() => Math.random() - 0.5);
-  return selectedCats.map(cat => {
+  const used = new Set();
+  const board = selectedCats.map(cat => {
     const pool = allQuestions.filter(q => q.category === cat);
-    const shuffled = pool.length ? [...pool].sort(() => Math.random() - 0.5) : fallbackPool;
-    const third = Math.max(1, Math.floor(shuffled.length / 3));
+    let picks = pickFresh(pool, POINTS.length, used);
+    if (picks.length < POINTS.length) {
+      picks = [...picks, ...pickFresh(allQuestions, POINTS.length - picks.length, new Set([...used, ...picks.map(q => q.id)]))];
+    }
+    picks.forEach(q => used.add(q.id));
     return {
       category: cat,
-      cells: POINTS.map((pts, i) => {
-        const slice = shuffled.slice(i * third, (i + 1) * third);
-        const q = slice.length
-          ? slice[Math.floor(Math.random() * slice.length)]
-          : shuffled[i % Math.max(shuffled.length, 1)] || fallbackPool[i] || null;
-        return { points: pts, question: q, answered: false, winner: null };
-      }),
+      cells: POINTS.map((pts, i) => ({ points: pts, question: picks[i] || null, answered: false, winner: null })),
     };
   });
+  markSeen([...used]);
+  return board;
 }
 
 // ── LOCAL game hook ───────────────────────────────────────────────────────────
@@ -72,6 +74,9 @@ function useLocalGame() {
   const [timerRunning, setTimer]    = useState(false);
   const [answeredCount, setCount]   = useState(0);
   const [selectedAnswer, setSelAns] = useState(null);
+  const [wrongOpts, setWrongOpts]   = useState([]);        // options already tried & wrong this question
+  const [attempt, setAttempt]       = useState(0);         // bumps the Timer key so it restarts
+  const [stats, setStats]           = useState(freshStats);
   const timeoutRef                  = useRef(null);
 
   // ── Super Powers state ─────────────────────────────────────────────────
@@ -86,6 +91,9 @@ function useLocalGame() {
   const [isHafra,        setIsHafra]         = useState(false); // الحفرة active
 
   const totalCells = 18;
+
+  const randomCategories = () => setSelected(shuffle(VALID_CATEGORIES).slice(0, 6));
+  const clearCategories  = () => setSelected([]);
 
   const toggleCategory = (cat) => {
     setSelected(prev => {
@@ -108,6 +116,8 @@ function useLocalGame() {
     setTimer(false);
     setCount(0);
     setSelAns(null);
+    setWrongOpts([]);
+    setStats(freshStats());
     setEliminatedOpts([]);
     setFriendTimer(false);
     setIsDoubled(false);
@@ -163,6 +173,8 @@ function useLocalGame() {
     setActiveTeam(currentTurn);
     setOrigTeam(currentTurn);
     setSelAns(null);
+    setWrongOpts([]);
+    setAttempt(a => a + 1);
     setPhase('answer');
     setTimer(true);
     setIsDoubled(false);
@@ -180,7 +192,7 @@ function useLocalGame() {
     const { colIdx, rowIdx } = activeCell;
     const cell = board[colIdx].cells[rowIdx];
     const isCorrect = cell.question.options[answerIdx] === cell.question.answer;
-    _resolveAnswer(isCorrect, cell);
+    _resolveAnswer(isCorrect, cell, answerIdx);
   };
 
   const timeUp = useCallback(() => {
@@ -191,8 +203,9 @@ function useLocalGame() {
     _resolveAnswer(false, cell);
   }, [phase, activeCell, board]); // eslint-disable-line
 
-  function _resolveAnswer(isCorrect, cell) {
+  function _resolveAnswer(isCorrect, cell, answerIdx = null) {
     clearTimeout(timeoutRef.current);
+    const markWrong = () => { if (answerIdx !== null) setWrongOpts(w => [...w, answerIdx]); };
     const resetPowers = () => { setIsDoubled(false); setIsTwoAnswers(false); setIsHafra(false); setEliminatedOpts([]); setFriendTimer(false); };
     const clearAndReturn = () => { setScreen('game'); setPhase('pick'); setActiveCell(null); setResultInfo(null); setSelAns(null); resetPowers(); };
 
@@ -218,6 +231,13 @@ function useLocalGame() {
       setTeams(newTeams);
       setBoard(newBoard);
       setCount(newCount);
+      setStats(prev => ({
+        ...prev,
+        [winner]: {
+          correct: prev[winner].correct + 1,
+          steals: prev[winner].steals + (phase === 'steal' ? 1 : 0),
+        },
+      }));
       setResultInfo({ isCorrect: true, winner, points: earned, hafra: isHafra && oppDeduct > 0, hafraPoints: oppDeduct, correctAnswer: cell.question?.answer, teams: newTeams });
       setPhase('result');
       setTurn(winner);
@@ -231,7 +251,9 @@ function useLocalGame() {
       if (phase === 'answer' && isTwoAnswers) {
         // إجابتين: first wrong → give another try (no steal)
         setIsTwoAnswers(false); // consume the two-answers bonus
+        markWrong();
         setSelAns(null);
+        setAttempt(a => a + 1);
         setTimer(true);
         // stay on question screen in answer phase
       } else if (phase === 'answer') {
@@ -239,7 +261,9 @@ function useLocalGame() {
         const stealTeam = activeTeam === 'A' ? 'B' : 'A';
         setActiveTeam(stealTeam);
         setPhase('steal');
+        markWrong();          // the stealing team sees which option was already wrong
         setSelAns(null);
+        setAttempt(a => a + 1);
         setTimer(true);
         setIsDoubled(false);
         setIsHafra(false);
@@ -257,6 +281,7 @@ function useLocalGame() {
         const newCount = answeredCount + 1;
         setBoard(newBoard);
         setCount(newCount);
+        markWrong();
         setResultInfo({ isCorrect: false, winner: null, points: 0, correctAnswer: cell.question?.answer, teams });
         setPhase('result');
         setTurn(originalTeam);
@@ -287,6 +312,7 @@ function useLocalGame() {
     setTimer(false);
     setCount(0);
     setSelAns(null);
+    setWrongOpts([]);
   };
 
   const currentQuestion = activeCell && board
@@ -298,7 +324,8 @@ function useLocalGame() {
 
   return {
     screen, teamAName, setTeamAName, teamBName, setTeamBName,
-    selected, toggleCategory, startGame,
+    selected, toggleCategory, startGame, randomCategories, clearCategories,
+    wrongOpts, attempt, stats,
     board, teams, currentTurn, activeTeam, phase,
     activeCell, pickCell, currentQuestion, currentPoints,
     submitAnswer, timeUp, timerRunning, selectedAnswer,
@@ -410,7 +437,15 @@ export default function MoneyBoardPage() {
           </div>
 
           <div className="cat-select-section">
-            <h3>اختر 6 فئات ({local.selected.length}/6)</h3>
+            <div className="cat-select-head">
+              <h3>اختر 6 فئات ({local.selected.length}/6)</h3>
+              <div className="cat-quick-btns">
+                <button className="cat-quick-btn" onClick={local.randomCategories}>🎲 عشوائي</button>
+                {local.selected.length > 0 && (
+                  <button className="cat-quick-btn" onClick={local.clearCategories}>✕ مسح</button>
+                )}
+              </div>
+            </div>
             <div className="cat-grid">
               {VALID_CATEGORIES.map(cat => (
                 <button
@@ -489,7 +524,7 @@ export default function MoneyBoardPage() {
               duration={isSteal ? STEAL_TIME : ANSWER_TIME}
               running={local.timerRunning}
               onEnd={local.timeUp}
-              key={isSteal ? 'steal' : 'answer'}
+              key={`t${local.attempt}`}
             />
           </div>
 
@@ -544,15 +579,28 @@ export default function MoneyBoardPage() {
           </div>
 
           <div className="options-grid">
-            {opts.map((opt, i) => (
-              <button key={i}
-                className={`option-btn ${local.selectedAnswer === i ? 'answered' : ''}`}
-                onClick={() => local.submitAnswer(i)}
-                disabled={local.selectedAnswer !== null}>
-                {opt}
-              </button>
-            ))}
+            {opts.map((opt, i) => {
+              const revealed = local.phase === 'result';
+              const isRight  = opt === local.currentQuestion?.answer;
+              const tried    = local.wrongOpts.includes(i);
+              const cls = revealed
+                ? (isRight ? 'opt-correct' : (local.selectedAnswer === i || tried) ? 'opt-wrong' : 'opt-dim')
+                : tried ? 'opt-wrong opt-eliminated'
+                : local.selectedAnswer === i ? 'answered' : '';
+              return (
+                <button key={i}
+                  className={`option-btn ${cls}`}
+                  onClick={() => local.submitAnswer(i)}
+                  disabled={local.selectedAnswer !== null || tried || revealed}>
+                  {opt}
+                </button>
+              );
+            })}
           </div>
+
+          {local.resultInfo && (
+            <ResultFlash info={local.resultInfo} teamNames={{ A: local.teamAName, B: local.teamBName }} />
+          )}
         </div>
       );
     }
@@ -565,6 +613,8 @@ export default function MoneyBoardPage() {
         <GameOverScreen
           teams={{ A: { ...local.teams.A, name: local.teamAName }, B: { ...local.teams.B, name: local.teamBName } }}
           winner={winner}
+          isTie={winner === null}
+          stats={local.stats}
           onReset={local.reset}
           onHome={() => navigate('/')}
         />
@@ -902,7 +952,7 @@ function ModeratorPanel({ teams, onAdjust, onClose }) {
   );
 }
 
-function GameOverScreen({ teams, winner, isTie, myTeam, onReset, onHome }) {
+function GameOverScreen({ teams, winner, isTie, myTeam, stats, onReset, onHome }) {
   const aM = teams.A.money, bM = teams.B.money;
   const winnerName = winner ? teams[winner]?.name : null;
   const isMyTeamWin = myTeam && myTeam === winner;
@@ -918,6 +968,11 @@ function GameOverScreen({ teams, winner, isTie, myTeam, onReset, onHome }) {
             <span className="final-team-name">{teams[t]?.name}</span>
             <span className="final-money">💰 {(teams[t]?.money || 0).toLocaleString('ar-SA')} ريال</span>
             {winner === t && <span className="final-crown">👑</span>}
+            {stats && (
+              <span className="final-stats">
+                ✅ {stats[t].correct} إجابة صحيحة{stats[t].steals ? ` · ⚡ ${stats[t].steals} سرقة` : ''}
+              </span>
+            )}
           </div>
         ))}
       </div>

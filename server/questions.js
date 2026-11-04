@@ -30,6 +30,7 @@ const travelQuestions = require('./questions_travel');
 const economyQuestions = require('./questions_economy');
 const healthQuestions = require('./questions_health');
 const entertainmentQuestions = require('./questions_entertainment');
+const huroofLetterQuestions = require('./questions_huroof_letters');
 
 // Legacy inline questions kept for backwards compatibility
 const legacyQuestions = [
@@ -259,7 +260,7 @@ const legacyQuestions = [
   }
 ];
 
-const questions = [
+const rawQuestions = [
   ...legacyQuestions,
   ...islamQuestions,
   ...scienceQuestions,
@@ -289,31 +290,120 @@ const questions = [
   ...economyQuestions,
   ...healthQuestions,
   ...entertainmentQuestions,
+  ...huroofLetterQuestions,
 ];
 
-// Arabic letters for Huroof game grid
+// ── Normalisation pipeline ───────────────────────────────────────────────────
+// Turns the raw category files into one clean, consistent question bank:
+//  • old one-word categories are merged into the board categories
+//  • if `answer` is not literally one of the options, the first option is used
+//  • `letter` is recomputed from the answer (ignoring "ال" and unifying أ/إ/آ/ا),
+//    and set to null for numeric/Latin answers so Huroof never draws them
+//  • duplicate questions (same text) are removed
+// The client bank (client/src/data/questions.json) is generated from this
+// output by `npm run build:questions`, so both sides always match.
+
+const CATEGORY_ALIASES = {
+  'جغرافيا': 'جغرافيا عالمية',
+  'دين': 'قرآن ومعرفة إسلامية',
+  'علوم': 'معلومات عامة',
+  'تاريخ': 'تاريخ عالمي',
+  'أدب': 'أدب عربي ولغة',
+  'لغة': 'أدب عربي ولغة',
+  'ثقافة عامة': 'معلومات عامة',
+  'ثقافة': 'ثقافة وفنون',
+  'رياضة': 'رياضة وأولمبياد',
+  'طعام': 'طعام ومطبخ',
+};
+
+// Arabic letters for Huroof game grid (hamza forms unified as "أ")
 const arabicLetters = [
   "أ", "ب", "ت", "ث", "ج", "ح", "خ", "د", "ذ", "ر",
   "ز", "س", "ش", "ص", "ض", "ط", "ظ", "ع", "غ", "ف",
   "ق", "ك", "ل", "م", "ن", "ه", "و", "ي"
 ];
+const LETTER_SET = new Set(arabicLetters);
+
+function answerLetter(answer) {
+  let a = String(answer).trim().replace(/^[«"'(\[]+/, '');
+  if (/^ال[ء-ي]{2}/.test(a)) a = a.slice(2);
+  let c = a[0];
+  if ('أإآاٱ'.includes(c)) c = 'أ';
+  if (c === 'ى') c = 'ي';
+  return LETTER_SET.has(c) ? c : null;
+}
+
+function normText(t) {
+  return String(t).replace(/[ً-ْـ]/g, '').replace(/[؟?!.,،:«»"'()\s]+/g, ' ').trim();
+}
+
+function normalize(list) {
+  const seen = new Set();
+  const out = [];
+  for (const raw of list) {
+    if (!raw || !raw.text || !Array.isArray(raw.options) || raw.options.length < 2) continue;
+    const key = normText(raw.text);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const options = [...new Set(raw.options.map(o => String(o).trim()))];
+    let answer = String(raw.answer ?? '').trim();
+    if (!options.includes(answer)) answer = options[0];
+    out.push({
+      id: raw.id,
+      text: raw.text.trim(),
+      answer,
+      options,
+      category: CATEGORY_ALIASES[raw.category] || raw.category,
+      letter: answerLetter(answer),
+    });
+  }
+  // guarantee unique ids
+  const ids = new Set();
+  let next = 100000;
+  for (const q of out) {
+    if (q.id == null || ids.has(q.id)) q.id = next++;
+    ids.add(q.id);
+  }
+  return out;
+}
+
+const questions = normalize(rawQuestions);
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+function shuffle(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+/** Copy of a question with its options in random order (the answer is never always first). */
+function withShuffledOptions(q) {
+  return q ? { ...q, options: shuffle(q.options) } : q;
+}
 
 function getRandomQuestions(count = 10) {
-  const shuffled = [...questions].sort(() => Math.random() - 0.5);
-  return shuffled.slice(0, Math.min(count, shuffled.length));
+  return shuffle(questions).slice(0, Math.min(count, questions.length)).map(withShuffledOptions);
 }
 
 function getQuestionsByLetter(letter) {
-  return questions.filter(q => q.letter === letter);
+  return questions.filter(q => q.letter === letter).map(withShuffledOptions);
 }
 
 function getRandomQuestion() {
-  return questions[Math.floor(Math.random() * questions.length)];
+  return withShuffledOptions(questions[Math.floor(Math.random() * questions.length)]);
 }
 
-function getRandomLetters(count) {
-  const shuffled = [...arabicLetters].sort(() => Math.random() - 0.5);
-  return shuffled.slice(0, count);
+/** Random letters — prefers letters that have at least `minQuestions` questions. */
+function getRandomLetters(count, minQuestions = 3) {
+  const good = arabicLetters.filter(l => questions.filter(q => q.letter === l).length >= minQuestions);
+  const pool = good.length >= count ? good : arabicLetters;
+  return shuffle(pool).slice(0, count);
 }
 
-module.exports = { questions, arabicLetters, getRandomQuestions, getQuestionsByLetter, getRandomQuestion, getRandomLetters };
+module.exports = {
+  questions, arabicLetters, shuffle, withShuffledOptions,
+  getRandomQuestions, getQuestionsByLetter, getRandomQuestion, getRandomLetters,
+};

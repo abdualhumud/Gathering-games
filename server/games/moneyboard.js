@@ -5,20 +5,11 @@
 // Most money after all 36 cells wins.
 // Super powers: each team gets 5 (double, fifty50, shield, stealTurn, extraTime) – each usable once.
 
-const { questions } = require('../questions');
+const { questions, shuffle, withShuffledOptions } = require('../questions');
 
-const VALID_CATEGORIES = [
-  // Original 15
-  'جغرافيا عربية', 'حيوانات وطبيعة', 'ثقافة وفنون', 'تاريخ عالمي',
-  'رياضة وأولمبياد', 'أدب عربي ولغة', 'جغرافيا عالمية', 'تكنولوجيا وحاسوب',
-  'فيزياء وكيمياء', 'طعام ومطبخ', 'قرآن ومعرفة إسلامية', 'فلك وعلوم الفضاء',
-  'معلومات عامة', 'أحياء وجسم الإنسان', 'رياضيات',
-  // From existing server files
-  'تاريخ إسلامي', 'علوم', 'جغرافيا', 'رياضة', 'دين',
-  // New categories
-  'أفلام ومسلسلات', 'موسيقى وفنون', 'لغة عربية ونحو', 'بيئة وطبيعة',
-  'سفر وسياحة', 'اقتصاد وأعمال', 'صحة وطب', 'ألعاب وترفيه',
-];
+// Every category with enough questions (same rule as the client).
+const VALID_CATEGORIES = [...new Set(questions.map(q => q.category))]
+  .filter(cat => questions.filter(q => q.category === cat).length >= 6);
 
 const POINTS = [200, 400, 600, 800, 1000, 1200];
 const ANSWER_TIME = 30; // seconds
@@ -69,21 +60,17 @@ class MoneyBoardGame {
 
   // ── Board construction ─────────────────────────────────────────────────────
   buildBoard(selectedCategories) {
+    const used = new Set();
+    const take = (pool, n) => shuffle(pool.filter(q => !used.has(q.id))).slice(0, n);
     this.board = selectedCategories.map(cat => {
-      const pool = questions.filter(q => q.category === cat);
-      const fallback = [...questions].sort(() => Math.random() - 0.5);
-      const source = pool.length >= 6 ? pool : (pool.length > 0 ? pool : fallback);
-      const shuffled = [...source].sort(() => Math.random() - 0.5);
-      const sixth = Math.max(1, Math.floor(shuffled.length / 6));
+      let picks = take(questions.filter(q => q.category === cat), POINTS.length);
+      if (picks.length < POINTS.length) picks = [...picks, ...take(questions, POINTS.length - picks.length)];
+      picks.forEach(q => used.add(q.id));
       return {
         category: cat,
-        cells: POINTS.map((pts, i) => {
-          const slice = shuffled.slice(i * sixth, (i + 1) * sixth);
-          const q = slice.length
-            ? slice[Math.floor(Math.random() * slice.length)]
-            : shuffled[i % shuffled.length] || fallback[i];
-          return { points: pts, question: q, answered: false, winner: null };
-        }),
+        cells: POINTS.map((pts, i) => ({
+          points: pts, question: withShuffledOptions(picks[i]), answered: false, winner: null,
+        })),
       };
     });
     this.answeredCount = 0;

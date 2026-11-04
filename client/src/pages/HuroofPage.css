@@ -427,3 +427,53 @@
   .score-item    { font-size: 0.74rem; padding: 4px 9px; }
   .buzzer-badge  { font-size: 1.1rem; }
 }
+
+/* ── Improvements: path mode, question hints, answer reveal ─────────────── */
+.win-mode-hint {
+  font-size: 0.85rem; color: var(--muted); text-align: center; margin: -4px 0 4px;
+}
+.team-goal { font-size: 0.78rem; font-weight: 800; white-space: nowrap; }
+.score-goal { opacity: 0.75; margin-inline-start: 4px; }
+
+/* Coloured frame showing which edges each team must connect */
+.hex-grid-framed {
+  padding: 12px 14px;
+  border-radius: 12px;
+  border-left: 7px solid var(--edge-h);
+  border-right: 7px solid var(--edge-h);
+  border-top: 7px solid var(--edge-v);
+  border-bottom: 7px solid var(--edge-v);
+}
+
+.hex-cell.hex-win-path { animation: winGlow 1.1s ease-in-out infinite; z-index: 3; }
+@keyframes winGlow {
+  0%, 100% { filter: brightness(1); }
+  50%      { filter: brightness(1.6) drop-shadow(0 0 10px var(--cell-color)); }
+}
+
+.q-category {
+  font-size: 0.8rem; font-weight: 700; color: var(--muted);
+  padding: 3px 12px; border-radius: 20px; border: 1px solid var(--border);
+}
+.q-hint { font-size: 0.85rem; color: var(--muted); font-weight: 700; }
+
+.opt-btn.opt-correct {
+  border-color: #22c55e; background: rgba(34,197,94,0.16); color: #22c55e;
+}
+.opt-btn.opt-wrong {
+  border-color: #ef4444; background: rgba(239,68,68,0.14); color: #ef4444;
+}
+.opt-btn.opt-dim { opacity: 0.45; }
+
+.skip-q-btn {
+  background: transparent; border: 1px dashed var(--border); color: var(--muted);
+  padding: 7px 14px; border-radius: 20px; font-size: 0.82rem; font-weight: 700;
+  cursor: pointer; font-family: inherit;
+}
+.skip-q-btn:hover { color: var(--text); border-color: var(--huroof-accent); }
+
+.huroof-over .gameover-actions { display: flex; gap: 10px; justify-content: center; }
+
+@media (max-width: 440px) {
+  .hex-grid-framed { padding: 8px; border-width: 5px; }
+}
