@@ -7,7 +7,8 @@
     "server": "node server/index.js",
     "client": "cd client && npm run dev",
     "install:all": "npm install && cd client && npm install",
-    "build:questions": "node scripts/build-questions.js"
+    "build:questions": "node scripts/validate-questions.js && node scripts/build-questions.js",
+    "validate:questions": "node scripts/validate-questions.js"
   },
   "dependencies": {
     "express": "^4.18.2",

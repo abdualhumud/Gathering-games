@@ -477,3 +477,8 @@
 @media (max-width: 440px) {
   .hex-grid-framed { padding: 8px; border-width: 5px; }
 }
+
+/* Team rows: the path goal goes on its own line so names aren't cut off */
+.huroof-team-row { flex-wrap: wrap; }
+.huroof-team-row .team-name-input { flex: 1; min-width: 0; }
+.huroof-team-row .team-goal { flex-basis: 100%; text-align: right; padding-inline-start: 50px; margin-top: -4px; }

@@ -341,3 +341,9 @@ input {
 
 .slide-up { animation: slideUp 0.3s ease; }
 @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+/* Phones: the back button sits above the card instead of overlapping it */
+@media (max-width: 600px) {
+  .page:has(> .back-btn) { padding-top: 64px; }
+  .back-btn { top: 12px; right: 12px; }
+}

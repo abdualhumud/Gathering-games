@@ -43,15 +43,25 @@ function buildLocalBoard(selectedCats) {
   const used = new Set();
   const board = selectedCats.map(cat => {
     const pool = allQuestions.filter(q => q.category === cat);
-    let picks = pickFresh(pool, POINTS.length, used);
-    if (picks.length < POINTS.length) {
-      picks = [...picks, ...pickFresh(allQuestions, POINTS.length - picks.length, new Set([...used, ...picks.map(q => q.id)]))];
-    }
-    picks.forEach(q => used.add(q.id));
-    return {
-      category: cat,
-      cells: POINTS.map((pts, i) => ({ points: pts, question: picks[i] || null, answered: false, winner: null })),
-    };
+    const cells = POINTS.map((pts, i) => {
+      // row i → difficulty i+1 (200 سهل، 400 متوسط، 600 صعب), falling back to
+      // nearby levels, then the whole category, then the whole bank.
+      const wanted = i + 1;
+      const tiers = [
+        pool.filter(q => q.difficulty === wanted),
+        pool.filter(q => Math.abs(q.difficulty - wanted) === 1),
+        pool,
+        allQuestions,
+      ];
+      let q = null;
+      for (const tier of tiers) {
+        q = pickFresh(tier, 1, used)[0];
+        if (q) break;
+      }
+      if (q) used.add(q.id);
+      return { points: pts, question: q || null, answered: false, winner: null };
+    });
+    return { category: cat, cells };
   });
   markSeen([...used]);
   return board;

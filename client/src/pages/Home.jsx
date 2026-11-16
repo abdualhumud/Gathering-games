@@ -57,7 +57,7 @@ export default function Home() {
       </div>
 
       <footer className="home-footer">
-        <p>ألعاب التجمعات &copy; 2024 — مبني بالحب 🤍</p>
+        <p>ألعاب التجمعات &copy; {new Date().getFullYear()} — مبني بالحب 🤍</p>
       </footer>
     </div>
   );

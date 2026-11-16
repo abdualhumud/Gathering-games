@@ -61,16 +61,19 @@ class MoneyBoardGame {
   // ── Board construction ─────────────────────────────────────────────────────
   buildBoard(selectedCategories) {
     const used = new Set();
-    const take = (pool, n) => shuffle(pool.filter(q => !used.has(q.id))).slice(0, n);
+    const pick = pool => shuffle(pool.filter(q => !used.has(q.id)))[0];
     this.board = selectedCategories.map(cat => {
-      let picks = take(questions.filter(q => q.category === cat), POINTS.length);
-      if (picks.length < POINTS.length) picks = [...picks, ...take(questions, POINTS.length - picks.length)];
-      picks.forEach(q => used.add(q.id));
+      const pool = questions.filter(q => q.category === cat);
       return {
         category: cat,
-        cells: POINTS.map((pts, i) => ({
-          points: pts, question: withShuffledOptions(picks[i]), answered: false, winner: null,
-        })),
+        cells: POINTS.map((pts, i) => {
+          // 6 rows → difficulty 1,1,2,2,3,3 (easy → hard), with fallbacks
+          const wanted = Math.min(3, Math.floor(i / 2) + 1);
+          const q = pick(pool.filter(x => x.difficulty === wanted))
+            || pick(pool) || pick(questions);
+          if (q) used.add(q.id);
+          return { points: pts, question: withShuffledOptions(q), answered: false, winner: null };
+        }),
       };
     });
     this.answeredCount = 0;
