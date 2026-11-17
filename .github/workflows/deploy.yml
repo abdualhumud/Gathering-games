@@ -38,6 +38,10 @@ jobs:
       - name: Build
         run: npm run build
         working-directory: client
+        env:
+          # Address of the game server for online rooms
+          # (GitHub → Settings → Secrets and variables → Actions → Variables → SERVER_URL)
+          VITE_SERVER_URL: ${{ vars.SERVER_URL }}
 
       - name: Setup Pages
         uses: actions/configure-pages@v5

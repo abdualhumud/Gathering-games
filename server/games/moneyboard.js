@@ -1,305 +1,279 @@
-// لوحة المال (MoneyBoard) — Jeopardy-style team trivia
-// Two teams take turns picking a cell from a 6-category × 6-difficulty board.
-// Correct answer → earn money and your team picks next.
-// Wrong/timeout → other team gets a steal attempt.
-// Most money after all 36 cells wins.
-// Super powers: each team gets 5 (double, fifty50, shield, stealTurn, extraTime) – each usable once.
-
+// لوحة المال (MoneyBoard) — online team board, same rules as local "choices" mode.
+// phase: lobby → pick → question → (steal) → result → pick … → over
+//  • 6 categories × 6 cells: 2×200 (سهل), 2×400 (متوسط), 2×600 (صعب).
+//  • The team whose turn it is picks a cell; any member may answer (first answer counts).
+//  • Wrong → the other team gets one steal attempt (the wrong option stays struck).
+//  • Correct → that team picks next. Failed steal → the picking team picks next.
+//  • Super powers (once per game per team): double, two, hafra, friend, block.
+const { SCALE, BaseGame, isIndex, publicQuestion } = require('./base');
 const { questions, shuffle, withShuffledOptions } = require('../questions');
 
-// Every category with enough questions (same rule as the client).
 const VALID_CATEGORIES = [...new Set(questions.map(q => q.category))]
   .filter(cat => questions.filter(q => q.category === cat).length >= 6);
+const CATEGORY_COUNTS = Object.fromEntries(VALID_CATEGORIES.map(c => [c, questions.filter(q => q.category === c).length]));
 
-// 6 per category: 2 × 200 (easy), 2 × 400 (medium), 2 × 600 (hard)
 const POINTS = [200, 400, 600, 200, 400, 600]; // same order as the client board
-const ANSWER_TIME = 30; // seconds
-const STEAL_TIME  = 15; // seconds
-const EXTRA_TIME  = 15; // seconds added by extraTime super power
+const ANSWER_TIME = 30;
+const STEAL_TIME = 15;
+const FRIEND_TIME = 30;
+const RESULT_MS = 2600;
+const POWERS = ['double', 'two', 'hafra', 'friend', 'block'];
+const TEAMS = ['A', 'B'];
 
-function freshSuperPowers() {
-  return { double: true, fifty50: true, shield: true, stealTurn: true, extraTime: true };
-}
+const other = t => (t === 'A' ? 'B' : 'A');
 
-class MoneyBoardGame {
-  constructor(roomId) {
-    this.roomId          = roomId;
-    this.host            = null;
-    this.state           = 'lobby';  // lobby | playing | question | steal | gameover
-    this.players         = {};       // socketId → { name, team, connected }
-    this.teams           = {
-      A: { money: 0, superPowers: freshSuperPowers() },
-      B: { money: 0, superPowers: freshSuperPowers() },
-    };
-    this.currentTurn     = 'A';     // team that picks the next cell
-    this.board           = null;    // array of { category, cells[] }
-    this.currentCell     = null;    // { colIdx, rowIdx }
-    this.currentQuestion = null;
-    this.activeTeam      = null;    // team currently answering or stealing
-    this.originalTeam    = null;    // team that originally picked the cell
-    this.answeredCount   = 0;
-    this.totalCells      = 36;
-    // Active super power state for current question
-    this.activeEffects   = { double: false, shield: false, stealTurn: null, removedOptions: null };
+class MoneyBoardGame extends BaseGame {
+  constructor(room) {
+    super(room);
+    this.categories = [];
+    this.usedIds = new Set();
+    this.teamNames = { A: 'الفريق الأول', B: 'الفريق الثاني' };
+    this.resetMatch();
   }
 
-  // ── Players ────────────────────────────────────────────────────────────────
-  addPlayer(socketId, name, team = 'A') {
-    this.players[socketId] = { name, team, connected: true };
-    if (!this.host) this.host = socketId;
-  }
-
-  removePlayer(socketId) {
-    if (this.players[socketId]) this.players[socketId].connected = false;
-    if (this.host === socketId) {
-      const next = Object.entries(this.players).find(([id, p]) => p.connected && id !== socketId);
-      this.host = next ? next[0] : null;
-    }
-  }
-
-  isHost(socketId) { return this.host === socketId; }
-
-  // ── Board construction ─────────────────────────────────────────────────────
-  buildBoard(selectedCategories) {
-    const used = new Set();
-    const pick = pool => shuffle(pool.filter(q => !used.has(q.id)))[0];
-    this.board = selectedCategories.map(cat => {
-      const pool = questions.filter(q => q.category === cat);
-      return {
-        category: cat,
-        cells: POINTS.map((pts, i) => {
-          // 200 → easy, 400 → medium, 600 → hard (fallback: any question of the category)
-          const wanted = (i % 3) + 1;
-          const q = pick(pool.filter(x => x.difficulty === wanted))
-            || pick(pool) || pick(questions);
-          if (q) used.add(q.id);
-          return { points: pts, question: withShuffledOptions(q), answered: false, winner: null };
-        }),
-      };
-    });
-    this.answeredCount = 0;
-    this.totalCells = selectedCategories.length * POINTS.length;
-  }
-
-  startGame(selectedCategories) {
-    this.buildBoard(selectedCategories);
-    this.state = 'playing';
+  resetMatch() {
+    this.board = null;
+    this.teams = { A: { money: 0, powers: [...POWERS] }, B: { money: 0, powers: [...POWERS] } };
+    this.stats = { A: { correct: 0, steals: 0 }, B: { correct: 0, steals: 0 } };
     this.currentTurn = 'A';
-    this.teams = {
-      A: { money: 0, superPowers: freshSuperPowers() },
-      B: { money: 0, superPowers: freshSuperPowers() },
-    };
-    this.activeEffects = { double: false, shield: false, stealTurn: null, removedOptions: null };
+    this.answered = 0;
+    this.resetCell();
+    this.result = null;
   }
 
-  // ── Gameplay ───────────────────────────────────────────────────────────────
-  selectCell(socketId, colIdx, rowIdx) {
-    const player = this.players[socketId];
-    if (!player || player.team !== this.currentTurn) return null;
-    if (this.state !== 'playing') return null;
-    const cell = this.board[colIdx]?.cells[rowIdx];
-    if (!cell || cell.answered) return null;
-
-    this.currentCell     = { colIdx, rowIdx };
-    this.currentQuestion = cell.question;
-    this.activeTeam      = this.currentTurn;
-    this.originalTeam    = this.currentTurn;
-    this.state           = 'question';
-    this.activeEffects   = { double: false, shield: false, stealTurn: null, removedOptions: null };
-    return {
-      colIdx, rowIdx,
-      question:   cell.question,
-      points:     cell.points,
-      activeTeam: this.activeTeam,
-    };
+  resetCell() {
+    this.cell = null;
+    this.activeTeam = null;
+    this.originalTeam = null;
+    this.wrongOpts = [];
+    this.effects = { double: false, two: false, hafra: false };
+    this.friendUntil = null;
+    this.lastPower = null;
   }
 
-  // ── Super Powers ───────────────────────────────────────────────────────────
-  activateSuperPower(socketId, power) {
-    const player = this.players[socketId];
-    if (!player) return null;
-    const team = player.team;
+  normaliseTeam(team) {
+    if (TEAMS.includes(team)) return team;
+    const n = t => this.players().filter(p => p.team === t).length;
+    return n('A') <= n('B') ? 'A' : 'B';
+  }
 
-    if (!this.teams[team].superPowers[power]) return null; // already used or invalid
-
-    // Mark as used
-    this.teams[team].superPowers[power] = false;
-
-    if (power === 'double') {
-      this.activeEffects.double = true;
-      return { power, team, activeEffects: this.activeEffects };
+  handle(player, type, data) {
+    switch (type) {
+      case 'team': {
+        if (this.phase !== 'lobby') return 'لا يمكن تغيير الفريق بعد البدء';
+        if (!TEAMS.includes(data.team)) return 'فريق غير صالح';
+        player.team = data.team;
+        return null;
+      }
+      case 'settings': {
+        if (!this.isHost(player) || this.phase !== 'lobby') return 'للمضيف قبل البدء فقط';
+        if (Array.isArray(data.categories)) {
+          const cats = [...new Set(data.categories.filter(c => VALID_CATEGORIES.includes(c)))].slice(0, 6);
+          this.categories = cats;
+        }
+        if (data.random) this.categories = shuffle(VALID_CATEGORIES).slice(0, 6);
+        for (const t of TEAMS) {
+          const name = data.teamNames && typeof data.teamNames[t] === 'string' ? data.teamNames[t].trim().slice(0, 20) : '';
+          if (name) this.teamNames[t] = name;
+        }
+        return null;
+      }
+      case 'start': return this.start(player);
+      case 'pick': return this.pick(player, data.col, data.row);
+      case 'power': return this.usePower(player, data.power);
+      case 'answer': return this.answer(player, data.index);
+      case 'adjust': {
+        if (!this.isHost(player) || !this.board) return 'للمضيف فقط';
+        const amount = Number(data.amount);
+        if (!TEAMS.includes(data.team) || !Number.isFinite(amount) || Math.abs(amount) > 100000) return 'قيمة غير صالحة';
+        this.teams[data.team].money = Math.max(0, this.teams[data.team].money + Math.round(amount));
+        return null;
+      }
+      case 'skip': {
+        if (!this.isHost(player) || (this.phase !== 'question' && this.phase !== 'steal')) return 'غير متاح الآن';
+        this.closeCell(null, { skipped: true });
+        return null;
+      }
+      case 'restart': {
+        if (!this.isHost(player) || this.phase !== 'over') return 'غير متاح الآن';
+        this.stopTimer();
+        this.resetMatch();
+        this.phase = 'lobby';
+        return null;
+      }
+      default: return 'إجراء غير معروف';
     }
+  }
 
-    if (power === 'shield') {
-      this.activeEffects.shield = true;
-      return { power, team, activeEffects: this.activeEffects };
+  start(player) {
+    if (!this.isHost(player)) return 'المضيف فقط يبدأ اللعبة';
+    if (this.phase !== 'lobby') return 'اللعبة بدأت';
+    if (this.categories.length !== 6) return 'اختر 6 فئات';
+    for (const t of TEAMS) {
+      if (!this.room.connectedPlayers().some(p => p.team === t)) return `يحتاج ${this.teamNames[t]} لاعباً واحداً على الأقل`;
     }
-
-    if (power === 'stealTurn') {
-      this.activeEffects.stealTurn = team;
-      return { power, team, activeEffects: this.activeEffects };
-    }
-
-    if (power === 'extraTime') {
-      return { power, team, extraSeconds: EXTRA_TIME };
-    }
-
-    if (power === 'fifty50') {
-      // Only works if question has 4 options
-      const q = this.currentQuestion;
-      if (!q || !q.options || q.options.length < 4) return null;
-      const correctIndex = q.options.indexOf(q.answer);
-      const wrongIndices = q.options.map((_, i) => i).filter(i => i !== correctIndex);
-      // Shuffle and remove 2 wrong answers
-      const toRemove = [...wrongIndices].sort(() => Math.random() - 0.5).slice(0, 2);
-      this.activeEffects.removedOptions = toRemove;
-      return { power, team, removedOptions: toRemove };
-    }
-
+    this.resetMatch();
+    this.buildBoard();
+    this.phase = 'pick';
     return null;
   }
 
-  // ── Operator actions (server-side manual override) ─────────────────────────
-  operatorAdjust(team, amount) {
-    if (!this.teams[team]) return null;
-    this.teams[team].money = Math.max(0, this.teams[team].money + amount);
-    return { teams: { ...this.teams } };
+  buildBoard() {
+    const used = new Set();
+    const fresh = pool => {
+      const unseen = pool.filter(q => !used.has(q.id) && !this.usedIds.has(q.id));
+      return shuffle(unseen.length ? unseen : pool.filter(q => !used.has(q.id)))[0];
+    };
+    this.board = this.categories.map(cat => {
+      const pool = questions.filter(q => q.category === cat);
+      return {
+        category: cat,
+        cells: POINTS.map((points, i) => {
+          const wanted = (i % 3) + 1;     // 200 → سهل, 400 → متوسط, 600 → صعب
+          const q = fresh(pool.filter(x => x.difficulty === wanted))
+            || fresh(pool.filter(x => Math.abs(x.difficulty - wanted) === 1))
+            || fresh(pool);
+          used.add(q.id);
+          this.usedIds.add(q.id);
+          return { points, question: withShuffledOptions(q), answered: false, winner: null };
+        }),
+      };
+    });
+    this.totalCells = this.board.length * POINTS.length;
   }
 
-  operatorSkipQuestion() {
-    if (this.state !== 'question' && this.state !== 'steal') return null;
-    const { colIdx, rowIdx } = this.currentCell;
-    const cell = this.board[colIdx].cells[rowIdx];
-    cell.answered = true;
-    cell.winner = null;
-    this.answeredCount++;
-    this.currentTurn = this.originalTeam;
-    this.activeEffects = { double: false, shield: false, stealTurn: null, removedOptions: null };
-    return this._finishCell(cell, null);
+  pick(player, col, row) {
+    if (this.phase !== 'pick') return 'انتظر';
+    if (player.team !== this.currentTurn) return 'ليس دور فريقك';
+    if (!isIndex(col, this.board.length) || !isIndex(row, POINTS.length)) return 'خانة غير صالحة';
+    const c = this.board[col].cells[row];
+    if (c.answered) return 'الخانة مستخدمة';
+    this.resetCell();
+    this.result = null;
+    this.cell = { col, row };
+    this.activeTeam = this.currentTurn;
+    this.originalTeam = this.currentTurn;
+    this.phase = 'question';
+    this.countdown(ANSWER_TIME, () => this.wrong(null));
+    return null;
   }
 
-  // ── Answer handling ────────────────────────────────────────────────────────
-  answer(socketId, answerIndex) {
-    const player = this.players[socketId];
-    if (!player || player.team !== this.activeTeam) return null;
-    if (this.state !== 'question' && this.state !== 'steal') return null;
-
-    const { colIdx, rowIdx } = this.currentCell;
-    const cell      = this.board[colIdx].cells[rowIdx];
-    const isCorrect = cell.question.options[answerIndex] === cell.question.answer;
-
-    if (isCorrect) {
-      const effectiveTeam = this.activeEffects.stealTurn || this.activeTeam;
-      return this._awardAndAdvance(cell, effectiveTeam);
-    } else {
-      return this._handleWrong(cell);
-    }
-  }
-
-  timeUp() {
-    if (this.state !== 'question' && this.state !== 'steal') return null;
-    const { colIdx, rowIdx } = this.currentCell;
-    const cell = this.board[colIdx].cells[rowIdx];
-    return this._handleWrong(cell);
-  }
-
-  _handleWrong(cell) {
-    if (this.state === 'question') {
-      // Shield: skip steal, give back to original team
-      if (this.activeEffects.shield) {
-        cell.answered = true;
-        cell.winner   = null;
-        this.answeredCount++;
-        this.currentTurn = this.originalTeam;
-        this.activeEffects = { double: false, shield: false, stealTurn: null, removedOptions: null };
-        return this._finishCell(cell, null);
+  usePower(player, power) {
+    if (this.phase !== 'question') return 'القوى قبل الإجابة فقط';
+    if (player.team !== this.activeTeam) return 'ليس دور فريقك';
+    const mine = this.teams[player.team].powers;
+    if (!POWERS.includes(power) || !mine.includes(power)) return 'القوة غير متاحة';
+    if (this.effects[power]) return 'مفعّلة بالفعل';
+    this.teams[player.team].powers = mine.filter(p => p !== power);
+    this.lastPower = { team: player.team, power, by: player.name };
+    if (power === 'friend') {
+      // 30 s to call a friend: added to the answer clock
+      const left = Math.ceil(this.msLeft() / 1000);
+      this.friendUntil = Date.now() + FRIEND_TIME * 1000 * SCALE;
+      this.countdown(left + FRIEND_TIME, () => this.wrong(null));
+    } else if (power === 'block') {
+      const opp = this.teams[other(player.team)];
+      if (opp.powers.length) {
+        const gone = opp.powers[Math.floor(Math.random() * opp.powers.length)];
+        opp.powers = opp.powers.filter(p => p !== gone);
+        this.lastPower.blocked = gone;
       }
-      // Normal: offer steal to other team
-      const stealTeam = this.activeTeam === 'A' ? 'B' : 'A';
-      this.activeTeam = stealTeam;
-      this.state = 'steal';
-      return { isCorrect: false, steal: true, stealTeam };
     } else {
-      // Steal also wrong — no one earns, original team picks next
-      cell.answered = true;
-      cell.winner   = null;
-      this.answeredCount++;
-      this.currentTurn = this.originalTeam;
-      this.activeEffects = { double: false, shield: false, stealTurn: null, removedOptions: null };
-      return this._finishCell(cell, null);
+      this.effects[power] = true;
     }
+    return null;
   }
 
-  _awardAndAdvance(cell, winningTeam) {
-    const pts = this.activeEffects.double ? cell.points * 2 : cell.points;
-    this.teams[winningTeam].money += pts;
-    cell.answered = true;
-    cell.winner   = winningTeam;
-    this.answeredCount++;
-    // If stealTurn effect was active: the team that activated it picks next
-    const nextTurn = this.activeEffects.stealTurn
-      ? (this.activeEffects.stealTurn === 'A' ? 'A' : 'B')
-      : winningTeam;
-    this.currentTurn = nextTurn;
-    this.activeEffects = { double: false, shield: false, stealTurn: null, removedOptions: null };
-    return this._finishCell(cell, winningTeam, pts);
+  answer(player, index) {
+    if (this.phase !== 'question' && this.phase !== 'steal') return 'لا يوجد سؤال';
+    if (player.team !== this.activeTeam) return 'ليس دور فريقك';
+    const q = this.currentCell().question;
+    if (!isIndex(index, q.options.length) || this.wrongOpts.includes(index)) return 'اختيار غير صالح';
+    if (q.options[index] === q.answer) this.correct(player, index);
+    else this.wrong(index, player);
+    return null;
   }
 
-  _finishCell(cell, winningTeam, pointsEarned) {
-    const earned = pointsEarned !== undefined ? pointsEarned : 0;
-    const gameOver = this.answeredCount >= this.totalCells;
-    if (gameOver) this.state = 'gameover';
-    else          this.state = 'playing';
+  currentCell() { return this.board[this.cell.col].cells[this.cell.row]; }
+
+  correct(player, index) {
+    const c = this.currentCell();
+    const winner = this.activeTeam;
+    const earned = this.effects.double ? c.points * 2 : c.points;
+    const deduct = this.effects.hafra ? c.points : 0;
+    this.teams[winner].money += earned;
+    if (deduct) this.teams[other(winner)].money = Math.max(0, this.teams[other(winner)].money - deduct);
+    this.stats[winner].correct++;
+    if (this.phase === 'steal') this.stats[winner].steals++;
+    this.currentTurn = winner;
+    this.closeCell(winner, { points: earned, hafraPoints: deduct, by: player.name, selected: index });
+  }
+
+  wrong(index, player) {
+    if (index !== null && index !== undefined) this.wrongOpts.push(index);
+    if (this.phase === 'question' && this.effects.two) {
+      this.effects.two = false;                 // إجابتين: one more try, no steal
+      this.countdown(ANSWER_TIME, () => this.wrong(null));
+      return;
+    }
+    if (this.phase === 'question') {
+      this.activeTeam = other(this.activeTeam);
+      this.effects.double = false;
+      this.effects.hafra = false;
+      this.friendUntil = null;
+      this.phase = 'steal';
+      this.countdown(STEAL_TIME, () => this.wrong(null));
+      return;
+    }
+    this.currentTurn = this.originalTeam;
+    this.closeCell(null, { by: player ? player.name : null, selected: index ?? null });
+  }
+
+  closeCell(winner, extra) {
+    const c = this.currentCell();
+    c.answered = true;
+    c.winner = winner;
+    this.answered++;
+    if (extra.skipped) this.currentTurn = this.originalTeam;
+    this.result = { winner, correctAnswer: c.question.answer, points: 0, hafraPoints: 0, ...extra };
+    this.phase = 'result';
+    this.after(RESULT_MS, () => {
+      this.resetCell();
+      this.result = null;
+      this.phase = this.answered >= this.totalCells ? 'over' : 'pick';
+    });
+  }
+
+  onLeave() {}
+
+  view() {
+    const c = this.cell ? this.currentCell() : null;
+    const open = this.phase === 'question' || this.phase === 'steal' || this.phase === 'result';
     return {
-      isCorrect:    winningTeam !== null,
-      winner:       winningTeam,
-      steal:        false,
-      pointsEarned: earned,
-      nextTurn:     this.currentTurn,
-      correctAnswer: cell.question.answer,
-      teams:         this._safeTeams(),
-      board:         this._safeBoard(),
-      gameOver,
-    };
-  }
-
-  // ── State helpers ──────────────────────────────────────────────────────────
-  _safeTeams() {
-    return {
-      A: { money: this.teams.A.money, superPowers: { ...this.teams.A.superPowers } },
-      B: { money: this.teams.B.money, superPowers: { ...this.teams.B.superPowers } },
-    };
-  }
-
-  _safeBoard() {
-    if (!this.board) return null;
-    return this.board.map(col => ({
-      category: col.category,
-      cells: col.cells.map(c => ({ points: c.points, answered: c.answered, winner: c.winner })),
-    }));
-  }
-
-  getState() {
-    return {
-      players:     this.players,
-      teams:       this._safeTeams(),
-      state:       this.state,
+      phase: this.phase,
+      categories: this.categories,
+      allCategories: CATEGORY_COUNTS,
+      teamNames: this.teamNames,
+      teams: this.teams,
+      stats: this.stats,
       currentTurn: this.currentTurn,
-      board:       this._safeBoard(),
-      host:        this.host,
-      activeTeam:  this.activeTeam,
-      activeEffects: this.activeEffects,
-    };
-  }
-
-  getResults() {
-    const aM = this.teams.A.money, bM = this.teams.B.money;
-    return {
-      teams: this._safeTeams(),
-      winner: aM > bM ? 'A' : bM > aM ? 'B' : 'tie',
-      board: this._safeBoard(),
+      activeTeam: this.activeTeam,
+      board: this.board && this.board.map(col => ({
+        category: col.category,
+        cells: col.cells.map(x => ({ points: x.points, answered: x.answered, winner: x.winner })),
+      })),
+      cell: this.cell,
+      question: open && c ? publicQuestion(c.question) : null,
+      points: c ? c.points : 0,
+      wrongOpts: this.wrongOpts,
+      effects: this.effects,
+      lastPower: this.lastPower,
+      friend: this.friendUntil && this.friendUntil > Date.now()
+        ? Math.ceil((this.friendUntil - Date.now()) / 1000 / SCALE) : 0,
+      result: this.result,
+      timer: this.timerView(),
     };
   }
 }
 
-module.exports = { MoneyBoardGame, VALID_CATEGORIES, ANSWER_TIME, STEAL_TIME, EXTRA_TIME };
+module.exports = { MoneyBoardGame, VALID_CATEGORIES, ANSWER_TIME, STEAL_TIME };

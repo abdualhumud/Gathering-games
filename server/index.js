@@ -1,385 +1,187 @@
+// ألعاب التجمعات — game server (Express + Socket.IO).
+//
+// Socket protocol (all requests use acknowledgements: socket.emit(evt, data, ack)):
+//   room:create { game, name, team?, options? }  → ack { ok, code, playerId, token }
+//   room:join   { game, code, name, team? }      → ack { ok, code, playerId, token }
+//   room:rejoin { game, code, token }            → ack { ok, code, playerId, token }
+//   room:leave  {}                               → ack { ok }
+//   room:action { type, ...payload }             → ack { ok } | { ok:false, error }
+// Server → client:
+//   room:state  <per-player view>   (after every change)
+//   room:replaced                   (same seat opened on another tab/device)
 const express = require('express');
 const http = require('http');
+const path = require('path');
+const fs = require('fs');
 const { Server } = require('socket.io');
 const cors = require('cors');
-const path = require('path');
-const { v4: uuidv4 } = require('uuid');
-const { AsbiqhumGame, QUESTION_TIME } = require('./games/asbiqhum');
-const { HuroofGame, ANSWER_TIME } = require('./games/huroof');
-const { MoneyBoardGame, VALID_CATEGORIES, ANSWER_TIME: MB_ANSWER_TIME, STEAL_TIME, EXTRA_TIME } = require('./games/moneyboard');
+const { RoomManager, cleanName } = require('./rooms');
+const { AsbiqhumGame } = require('./games/asbiqhum');
+const { HuroofGame } = require('./games/huroof');
+const { MoneyBoardGame, VALID_CATEGORIES } = require('./games/moneyboard');
+const { questions } = require('./questions');
+
+const PORT = process.env.PORT || 3001;
+// Comma-separated list of allowed browser origins, or "*" (default).
+const ORIGINS = (process.env.CORS_ORIGIN || '*').split(',').map(s => s.trim()).filter(Boolean);
+const corsOrigin = ORIGINS.includes('*') ? '*' : ORIGINS;
 
 const app = express();
-app.use(cors());
-app.use(express.json());
-
-// Serve static client in production
-app.use(express.static(path.join(__dirname, '../client/dist')));
+app.use(cors({ origin: corsOrigin }));
+app.disable('x-powered-by');
 
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: { origin: '*', methods: ['GET', 'POST'] }
+  cors: { origin: corsOrigin, methods: ['GET', 'POST'] },
+  pingInterval: 20000,
+  pingTimeout: 25000,
+  maxHttpBufferSize: 1e5,
 });
 
-// Room stores
-const asbiqhumRooms  = {}; // roomCode -> AsbiqhumGame
-const huroofRooms    = {}; // roomCode -> HuroofGame
-const moneyRooms     = {}; // roomCode -> MoneyBoardGame
-const socketRooms    = {}; // socketId -> { game, roomCode }
-const roomTimers     = {}; // roomCode -> timer
+const rooms = new RoomManager(io, {
+  asbiqhum: AsbiqhumGame,
+  huroof: HuroofGame,
+  money: MoneyBoardGame,
+});
 
-function generateRoomCode() {
-  return Math.random().toString(36).substring(2, 7).toUpperCase();
-}
-
-function clearRoomTimer(roomCode) {
-  if (roomTimers[roomCode]) {
-    clearTimeout(roomTimers[roomCode]);
-    delete roomTimers[roomCode];
-  }
-}
-
-// ──────────────────────────────────────────────
-// REST endpoints
-// ──────────────────────────────────────────────
-app.get('/api/health', (req, res) => res.json({ status: 'ok', rooms: { asbiqhum: Object.keys(asbiqhumRooms).length, huroof: Object.keys(huroofRooms).length, moneyboard: Object.keys(moneyRooms).length } }));
+// ── REST ──────────────────────────────────────────────────────────────────────
+const startedAt = Date.now();
+app.get('/api/health', (req, res) => res.json({
+  status: 'ok',
+  uptimeSec: Math.round((Date.now() - startedAt) / 1000),
+  questions: questions.length,
+  ...rooms.stats(),
+}));
 app.get('/api/categories', (req, res) => res.json({ categories: VALID_CATEGORIES }));
 
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, '../client/dist/index.html'));
-});
+// ── Static client (when the server also hosts the site) ───────────────────────
+// The client is built with base "/Gathering-games/" (GitHub Pages), so serve it
+// there and redirect the bare root.
+const dist = path.join(__dirname, '../client/dist');
+if (fs.existsSync(path.join(dist, 'index.html'))) {
+  app.use('/Gathering-games', express.static(dist, { maxAge: '1h', index: 'index.html' }));
+  app.get('/', (req, res) => res.redirect('/Gathering-games/'));
+  app.get('/Gathering-games/*', (req, res) => res.sendFile(path.join(dist, 'index.html')));
+} else {
+  app.get('/', (req, res) => res.type('text').send('Gathering Games server is running. See /api/health'));
+}
 
-// ──────────────────────────────────────────────
-// Socket.IO
-// ──────────────────────────────────────────────
+// ── Socket.IO ─────────────────────────────────────────────────────────────────
+const RATE_WINDOW_MS = 1000;
+const RATE_MAX = Number(process.env.GG_RATE_MAX) || 25;
+
 io.on('connection', (socket) => {
-  console.log(`[+] connected: ${socket.id}`);
+  let windowStart = Date.now(), count = 0;
+  const limited = () => {
+    const now = Date.now();
+    if (now - windowStart > RATE_WINDOW_MS) { windowStart = now; count = 0; }
+    return ++count > RATE_MAX;
+  };
 
-  // ── ASBIQHUM ──────────────────────────────
-  socket.on('asbiqhum:create', ({ playerName }) => {
-    const code = generateRoomCode();
-    const game = new AsbiqhumGame(code);
-    game.addPlayer(socket.id, playerName);
-    asbiqhumRooms[code] = game;
-    socketRooms[socket.id] = { game: 'asbiqhum', roomCode: code };
-    socket.join(code);
-    socket.emit('asbiqhum:created', { roomCode: code, isHost: true, state: game.getState() });
-    console.log(`[asbiqhum] room created: ${code} by ${playerName}`);
-  });
-
-  socket.on('asbiqhum:join', ({ roomCode, playerName }) => {
-    const code = roomCode.toUpperCase();
-    const game = asbiqhumRooms[code];
-    if (!game) return socket.emit('error', { message: 'الغرفة غير موجودة' });
-    if (game.state !== 'lobby') return socket.emit('error', { message: 'اللعبة بدأت بالفعل' });
-
-    game.addPlayer(socket.id, playerName);
-    socketRooms[socket.id] = { game: 'asbiqhum', roomCode: code };
-    socket.join(code);
-    socket.emit('asbiqhum:joined', { roomCode: code, isHost: game.isHost(socket.id), state: game.getState() });
-    io.to(code).emit('asbiqhum:player_joined', { state: game.getState() });
-  });
-
-  socket.on('asbiqhum:start', () => {
-    const info = socketRooms[socket.id];
-    if (!info || info.game !== 'asbiqhum') return;
-    const game = asbiqhumRooms[info.roomCode];
-    if (!game || !game.isHost(socket.id)) return socket.emit('error', { message: 'أنت لست المضيف' });
-    if (Object.keys(game.players).length < 2) return socket.emit('error', { message: 'تحتاج لاعبَين على الأقل' });
-
-    const questionEvent = game.startGame();
-    io.to(info.roomCode).emit('asbiqhum:question', questionEvent);
-
-    // Auto-advance after time limit
-    clearRoomTimer(info.roomCode);
-    roomTimers[info.roomCode] = setTimeout(() => {
-      handleAsbiqhumTimeUp(info.roomCode);
-    }, QUESTION_TIME * 1000 + 500);
-  });
-
-  socket.on('asbiqhum:buzz', () => {
-    const info = socketRooms[socket.id];
-    if (!info || info.game !== 'asbiqhum') return;
-    const game = asbiqhumRooms[info.roomCode];
-    if (!game) return;
-
-    const event = game.buzz(socket.id);
-    if (event) {
-      clearRoomTimer(info.roomCode);
-      io.to(info.roomCode).emit('asbiqhum:buzzed', event);
-      // Give buzzed player time to answer
-      roomTimers[info.roomCode] = setTimeout(() => {
-        const timeUpEvent = game.timeUp();
-        if (timeUpEvent) {
-          io.to(info.roomCode).emit('asbiqhum:time_up', timeUpEvent);
-          scheduleNextQuestion(info.roomCode);
-        }
-      }, 10000); // 10 seconds to answer after buzz
+  // Wrap every handler: validate the ack, never let an exception kill the process.
+  const on = (event, handler) => socket.on(event, (data, ack) => {
+    const reply = typeof ack === 'function' ? ack : () => {};
+    if (limited()) return reply({ ok: false, error: 'طلبات كثيرة — تمهّل قليلاً' });
+    try {
+      const out = handler(data && typeof data === 'object' ? data : {});
+      reply(out || { ok: true });
+    } catch (e) {
+      console.error(`[socket ${event}]`, e);
+      reply({ ok: false, error: 'خطأ في الخادم' });
     }
   });
 
-  socket.on('asbiqhum:answer', ({ answerIndex }) => {
-    const info = socketRooms[socket.id];
-    if (!info || info.game !== 'asbiqhum') return;
-    const game = asbiqhumRooms[info.roomCode];
-    if (!game) return;
+  const leaveCurrent = () => {
+    const cur = rooms.ofSocket(socket.id);
+    if (!cur) return;
+    socket.leave(cur.room.code);
+    rooms.bySocket.delete(socket.id);
+    const { room, player } = cur;
+    if (room.game.phase === 'lobby') room.removePlayer(player.id);
+    else { player.connected = false; player.socketId = null; room.game.onDisconnect && room.game.onDisconnect(player); }
+    if (room.players.size === 0) { room.destroy(); rooms.rooms.delete(room.code); return; }
+    if (room.hostId === player.id) room.pickNewHost();
+    room.broadcast();
+  };
 
-    clearRoomTimer(info.roomCode);
-    const event = game.submitAnswer(socket.id, answerIndex);
-    if (event) {
-      io.to(info.roomCode).emit('asbiqhum:answer_result', event);
-      if (event.type === 'game_over') {
-        io.to(info.roomCode).emit('asbiqhum:game_over', event);
-      } else {
-        scheduleNextQuestion(info.roomCode);
+  const seat = (room, player) => {
+    room.attach(player, socket);
+    room.broadcast();
+    return { ok: true, code: room.code, playerId: player.id, token: player.token };
+  };
+
+  on('room:create', ({ game, name, team, options }) => {
+    const n = cleanName(name);
+    if (!n) return { ok: false, error: 'أدخل اسمك' };
+    if (!rooms.types[game]) return { ok: false, error: 'لعبة غير معروفة' };
+    leaveCurrent();
+    const room = rooms.create(game, options);
+    const { player, error } = room.addPlayer(n, { team: room.game.normaliseTeam ? room.game.normaliseTeam(team) : null });
+    if (error) return { ok: false, error };
+    console.log(`[${game}] room ${room.code} created`);
+    return seat(room, player);
+  });
+
+  on('room:join', ({ game, code, name, team }) => {
+    const n = cleanName(name);
+    if (!n) return { ok: false, error: 'أدخل اسمك' };
+    const room = rooms.get(code);
+    if (!room || room.type !== game) return { ok: false, error: 'الغرفة غير موجودة — تأكد من الرمز' };
+    if (room.game.phase !== 'lobby') return { ok: false, error: 'اللعبة بدأت بالفعل' };
+    leaveCurrent();
+    const { player, error } = room.addPlayer(n, { team: room.game.normaliseTeam ? room.game.normaliseTeam(team) : null });
+    if (error) return { ok: false, error };
+    return seat(room, player);
+  });
+
+  on('room:rejoin', ({ game, code, token }) => {
+    const room = rooms.get(code);
+    if (!room || room.type !== game || typeof token !== 'string') return { ok: false, error: 'انتهت الغرفة', gone: true };
+    const player = [...room.players.values()].find(p => p.token === token);
+    if (!player) return { ok: false, error: 'انتهت جلستك في هذه الغرفة', gone: true };
+    return seat(room, player);
+  });
+
+  on('room:leave', () => { leaveCurrent(); return { ok: true }; });
+
+  on('room:action', (data) => {
+    const cur = rooms.ofSocket(socket.id);
+    if (!cur) return { ok: false, error: 'لست في غرفة', gone: true };
+    const { room, player } = cur;
+    const type = typeof data.type === 'string' ? data.type : '';
+    // Host-only room management shared by all games
+    if (type === 'kick') {
+      if (room.hostId !== player.id) return { ok: false, error: 'للمضيف فقط' };
+      const target = room.players.get(data.playerId);
+      if (!target || target.id === player.id) return { ok: false, error: 'لاعب غير موجود' };
+      if (target.socketId) {
+        const s = io.sockets.sockets.get(target.socketId);
+        if (s) { s.leave(room.code); s.emit('room:kicked'); }
+        rooms.bySocket.delete(target.socketId);
       }
+      room.removePlayer(target.id);
+      room.broadcast();
+      return { ok: true };
     }
+    const error = room.game.handle(player, type, data);
+    room.broadcast();
+    return error ? { ok: false, error } : { ok: true };
   });
 
-  function handleAsbiqhumTimeUp(roomCode) {
-    const game = asbiqhumRooms[roomCode];
-    if (!game) return;
-    const event = game.timeUp();
-    if (event) {
-      io.to(roomCode).emit('asbiqhum:time_up', event);
-      scheduleNextQuestion(roomCode);
-    }
-  }
-
-  function scheduleNextQuestion(roomCode) {
-    const game = asbiqhumRooms[roomCode];
-    if (!game) return;
-    clearRoomTimer(roomCode);
-    roomTimers[roomCode] = setTimeout(() => {
-      const questionEvent = game.nextQuestion();
-      if (questionEvent.type === 'game_over') {
-        io.to(roomCode).emit('asbiqhum:game_over', questionEvent);
-      } else {
-        io.to(roomCode).emit('asbiqhum:question', questionEvent);
-        roomTimers[roomCode] = setTimeout(() => {
-          handleAsbiqhumTimeUp(roomCode);
-        }, QUESTION_TIME * 1000 + 500);
-      }
-    }, 3000); // 3 second delay between questions
-  }
-
-  // ── HUROOF ────────────────────────────────
-  socket.on('huroof:create', ({ playerName, team, gridSize }) => {
-    const code = generateRoomCode();
-    const game = new HuroofGame(code, gridSize || 'medium');
-    game.addPlayer(socket.id, playerName, team || 'A');
-    huroofRooms[code] = game;
-    socketRooms[socket.id] = { game: 'huroof', roomCode: code };
-    socket.join(code);
-    socket.emit('huroof:created', { roomCode: code, isHost: true, state: game.getState() });
-  });
-
-  socket.on('huroof:join', ({ roomCode, playerName, team }) => {
-    const code = roomCode.toUpperCase();
-    const game = huroofRooms[code];
-    if (!game) return socket.emit('error', { message: 'الغرفة غير موجودة' });
-    if (game.state !== 'lobby') return socket.emit('error', { message: 'اللعبة بدأت بالفعل' });
-
-    game.addPlayer(socket.id, playerName, team);
-    socketRooms[socket.id] = { game: 'huroof', roomCode: code };
-    socket.join(code);
-    socket.emit('huroof:joined', { roomCode: code, isHost: game.isHost(socket.id), state: game.getState() });
-    io.to(code).emit('huroof:player_joined', { state: game.getState() });
-  });
-
-  socket.on('huroof:start', () => {
-    const info = socketRooms[socket.id];
-    if (!info || info.game !== 'huroof') return;
-    const game = huroofRooms[info.roomCode];
-    if (!game || !game.isHost(socket.id)) return socket.emit('error', { message: 'أنت لست المضيف' });
-
-    const event = game.startGame();
-    io.to(info.roomCode).emit('huroof:game_started', event);
-  });
-
-  socket.on('huroof:select_cell', ({ cellIndex }) => {
-    const info = socketRooms[socket.id];
-    if (!info || info.game !== 'huroof') return;
-    const game = huroofRooms[info.roomCode];
-    if (!game) return;
-
-    const event = game.selectCell(socket.id, cellIndex);
-    if (event) {
-      io.to(info.roomCode).emit('huroof:cell_selected', event);
-      clearRoomTimer(info.roomCode);
-      roomTimers[info.roomCode] = setTimeout(() => {
-        const timeUpEvent = game.timeUp();
-        if (timeUpEvent) {
-          io.to(info.roomCode).emit('huroof:time_up', timeUpEvent);
-        }
-      }, ANSWER_TIME * 1000 + 500);
-    }
-  });
-
-  socket.on('huroof:answer', ({ answerIndex }) => {
-    const info = socketRooms[socket.id];
-    if (!info || info.game !== 'huroof') return;
-    const game = huroofRooms[info.roomCode];
-    if (!game) return;
-
-    clearRoomTimer(info.roomCode);
-    const event = game.submitAnswer(socket.id, answerIndex);
-    if (event) {
-      if (event.type === 'game_over') {
-        io.to(info.roomCode).emit('huroof:game_over', event);
-      } else {
-        io.to(info.roomCode).emit('huroof:answer_result', event);
-      }
-    }
-  });
-
-  // ── MONEY BOARD ───────────────────────────
-  socket.on('money:create', ({ playerName, team }) => {
-    const code = generateRoomCode();
-    const game = new MoneyBoardGame(code);
-    game.addPlayer(socket.id, playerName, team || 'A');
-    moneyRooms[code] = game;
-    socketRooms[socket.id] = { game: 'money', roomCode: code };
-    socket.join(code);
-    socket.emit('money:created', { roomCode: code, isHost: true, state: game.getState(), categories: VALID_CATEGORIES });
-    console.log(`[money] room created: ${code} by ${playerName}`);
-  });
-
-  socket.on('money:join', ({ roomCode, playerName, team }) => {
-    const code = roomCode.toUpperCase();
-    const game = moneyRooms[code];
-    if (!game) return socket.emit('error', { message: 'الغرفة غير موجودة' });
-    if (game.state !== 'lobby') return socket.emit('error', { message: 'اللعبة بدأت بالفعل' });
-    game.addPlayer(socket.id, playerName, team || 'A');
-    socketRooms[socket.id] = { game: 'money', roomCode: code };
-    socket.join(code);
-    socket.emit('money:joined', { roomCode: code, isHost: game.isHost(socket.id), state: game.getState(), categories: VALID_CATEGORIES });
-    io.to(code).emit('money:player_joined', { state: game.getState() });
-  });
-
-  socket.on('money:start', ({ selectedCategories }) => {
-    const info = socketRooms[socket.id];
-    if (!info || info.game !== 'money') return;
-    const game = moneyRooms[info.roomCode];
-    if (!game || !game.isHost(socket.id)) return socket.emit('error', { message: 'أنت لست المضيف' });
-    if (!selectedCategories || selectedCategories.length !== 6) return socket.emit('error', { message: 'اختر 6 فئات' });
-    game.startGame(selectedCategories);
-    io.to(info.roomCode).emit('money:game_started', { state: game.getState() });
-    console.log(`[money] game started: ${info.roomCode}`);
-  });
-
-  socket.on('money:select_cell', ({ colIdx, rowIdx }) => {
-    const info = socketRooms[socket.id];
-    if (!info || info.game !== 'money') return;
-    const game = moneyRooms[info.roomCode];
-    if (!game) return;
-    const event = game.selectCell(socket.id, colIdx, rowIdx);
-    if (event) {
-      io.to(info.roomCode).emit('money:cell_selected', event);
-      clearRoomTimer(info.roomCode);
-      roomTimers[info.roomCode] = setTimeout(() => {
-        const result = game.timeUp();
-        if (result) handleMoneyResult(info.roomCode, result);
-      }, MB_ANSWER_TIME * 1000 + 500);
-    }
-  });
-
-  socket.on('money:answer', ({ answerIndex }) => {
-    const info = socketRooms[socket.id];
-    if (!info || info.game !== 'money') return;
-    const game = moneyRooms[info.roomCode];
-    if (!game) return;
-    clearRoomTimer(info.roomCode);
-    const result = game.answer(socket.id, answerIndex);
-    if (result) {
-      if (result.steal) {
-        io.to(info.roomCode).emit('money:steal_chance', result);
-        roomTimers[info.roomCode] = setTimeout(() => {
-          const r2 = game.timeUp();
-          if (r2) handleMoneyResult(info.roomCode, r2);
-        }, STEAL_TIME * 1000 + 500);
-      } else {
-        handleMoneyResult(info.roomCode, result);
-      }
-    }
-  });
-
-  socket.on('money:super_power', ({ power }) => {
-    const info = socketRooms[socket.id];
-    if (!info || info.game !== 'money') return;
-    const game = moneyRooms[info.roomCode];
-    if (!game) return;
-    const result = game.activateSuperPower(socket.id, power);
-    if (result) {
-      io.to(info.roomCode).emit('money:super_power_used', result);
-      // If extraTime, extend the current timer
-      if (power === 'extraTime') {
-        clearRoomTimer(info.roomCode);
-        const isSteal = game.state === 'steal';
-        const baseTime = isSteal ? STEAL_TIME : MB_ANSWER_TIME;
-        roomTimers[info.roomCode] = setTimeout(() => {
-          const r = game.timeUp();
-          if (r) handleMoneyResult(info.roomCode, r);
-        }, (baseTime + EXTRA_TIME) * 1000 + 500);
-      }
-    }
-  });
-
-  socket.on('money:operator_adjust', ({ team, amount }) => {
-    const info = socketRooms[socket.id];
-    if (!info || info.game !== 'money') return;
-    const game = moneyRooms[info.roomCode];
-    if (!game || !game.isHost(socket.id)) return;
-    const result = game.operatorAdjust(team, amount);
-    if (result) io.to(info.roomCode).emit('money:teams_updated', result);
-  });
-
-  socket.on('money:operator_skip', () => {
-    const info = socketRooms[socket.id];
-    if (!info || info.game !== 'money') return;
-    const game = moneyRooms[info.roomCode];
-    if (!game || !game.isHost(socket.id)) return;
-    clearRoomTimer(info.roomCode);
-    const result = game.operatorSkipQuestion();
-    if (result) handleMoneyResult(info.roomCode, result);
-  });
-
-  function handleMoneyResult(roomCode, result) {
-    const game = moneyRooms[roomCode];
-    if (!game) return;
-    if (result.steal) {
-      io.to(roomCode).emit('money:steal_chance', result);
-      clearRoomTimer(roomCode);
-      roomTimers[roomCode] = setTimeout(() => {
-        const r2 = game.timeUp();
-        if (r2) handleMoneyResult(roomCode, r2);
-      }, STEAL_TIME * 1000 + 500);
-    } else if (result.gameOver) {
-      io.to(roomCode).emit('money:answer_result', result);
-      io.to(roomCode).emit('money:game_over', game.getResults());
-    } else {
-      io.to(roomCode).emit('money:answer_result', result);
-    }
-  }
-
-  // ── DISCONNECT ────────────────────────────
   socket.on('disconnect', () => {
-    const info = socketRooms[socket.id];
-    if (info) {
-      if (info.game === 'asbiqhum' && asbiqhumRooms[info.roomCode]) {
-        asbiqhumRooms[info.roomCode].removePlayer(socket.id);
-        io.to(info.roomCode).emit('asbiqhum:player_left', { state: asbiqhumRooms[info.roomCode].getState() });
-      } else if (info.game === 'huroof' && huroofRooms[info.roomCode]) {
-        huroofRooms[info.roomCode].removePlayer(socket.id);
-        io.to(info.roomCode).emit('huroof:player_left', { state: huroofRooms[info.roomCode].getState() });
-      } else if (info.game === 'money' && moneyRooms[info.roomCode]) {
-        moneyRooms[info.roomCode].removePlayer(socket.id);
-        io.to(info.roomCode).emit('money:player_left', { state: moneyRooms[info.roomCode].getState() });
-      }
-      delete socketRooms[socket.id];
-    }
-    console.log(`[-] disconnected: ${socket.id}`);
+    const cur = rooms.ofSocket(socket.id);
+    rooms.bySocket.delete(socket.id);
+    if (!cur || cur.player.socketId !== socket.id) return;
+    cur.room.detach(cur.player);
+    cur.room.broadcast();
   });
 });
 
-const PORT = process.env.PORT || 3001;
-server.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
+process.on('unhandledRejection', e => console.error('unhandledRejection', e));
+process.on('uncaughtException', e => console.error('uncaughtException', e));
+
+if (require.main === module) {
+  server.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
+}
+
+module.exports = { app, server, io, rooms };

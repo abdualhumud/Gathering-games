@@ -1,9 +1,10 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { socket } from '../socket';
+import AsbiqhumRoom from '../rooms/AsbiqhumRoom';
+import { hasSeat } from '../rooms/useRoom';
+import { inviteCode } from '../rooms/roomUtils';
 import { getRandomQuestions } from '../questions';
 import Timer from '../components/Timer';
-import Scoreboard from '../components/Scoreboard';
 import './AsbiqhumPage.css';
 
 const QUESTION_TIME = 20;
@@ -11,9 +12,9 @@ const BASE_POINTS = 100;
 const WRONG_PENALTY = -20;
 const QUESTIONS_PER_GAME = 10;
 const MAX_PLAYERS = 8;
-const OPT_KEYS = ['أ', 'ب', 'ج', 'د'];
+export const OPT_KEYS = ['أ', 'ب', 'ج', 'د'];
 const PLAYER_COLORS = ['#00d4ff', '#f97316', '#22c55e', '#a855f7', '#ef4444', '#fbbf24', '#ec4899', '#84cc16'];
-const pcStyle = i => ({ '--pc': PLAYER_COLORS[(i ?? 0) % PLAYER_COLORS.length] });
+export const pcStyle = i => ({ '--pc': PLAYER_COLORS[(i ?? 0) % PLAYER_COLORS.length] });
 
 // ─── Local game logic ────────────────────────────────────────────────────────
 
@@ -134,50 +135,11 @@ function useLocalGame() {
 
 export default function AsbiqhumPage() {
   const navigate = useNavigate();
-  const [mode, setMode] = useState(null); // null | 'local' | 'room'
-
-  // Room mode state
-  const [roomScreen, setRoomScreen] = useState('setup');
-  const [playerName, setPlayerName] = useState('');
-  const [roomCode, setRoomCode] = useState('');
-  const [joinCode, setJoinCode] = useState('');
-  const [isHost, setIsHost] = useState(false);
-  const [gameState, setGameState] = useState(null);
-  const [question, setQuestion] = useState(null);
-  const [buzzedInfo, setBuzzedInfo] = useState(null);
-  const [answerResult, setAnswerResult] = useState(null);
-  const [timeUpInfo, setTimeUpInfo] = useState(null);
-  const [finalResults, setFinalResults] = useState(null);
-  const [myId, setMyId] = useState(null);
-  const [error, setError] = useState('');
-  const [timerRunning, setTimerRunning] = useState(false);
-  const [selectedAnswer, setSelectedAnswer] = useState(null);
+  const [mode, setMode] = useState(() => (inviteCode() || hasSeat('asbiqhum') ? 'room' : null)); // null | 'local' | 'room'
 
   const local = useLocalGame();
 
-  // Room socket setup
-  useEffect(() => {
-    if (mode !== 'room') return;
-    socket.connect();
-    setMyId(socket.id);
-    socket.on('connect', () => setMyId(socket.id));
-    socket.on('asbiqhum:created', ({ roomCode, isHost, state }) => { setRoomCode(roomCode); setIsHost(isHost); setGameState(state); setRoomScreen('lobby'); });
-    socket.on('asbiqhum:joined', ({ roomCode, isHost, state }) => { setRoomCode(roomCode); setIsHost(isHost); setGameState(state); setRoomScreen('lobby'); });
-    socket.on('asbiqhum:player_joined', ({ state }) => setGameState(state));
-    socket.on('asbiqhum:player_left', ({ state }) => setGameState(state));
-    socket.on('asbiqhum:question', (data) => { setQuestion(data); setBuzzedInfo(null); setAnswerResult(null); setTimeUpInfo(null); setSelectedAnswer(null); setTimerRunning(true); setRoomScreen('question'); });
-    socket.on('asbiqhum:buzzed', (data) => { setBuzzedInfo(data); setTimerRunning(false); setRoomScreen('buzzed'); });
-    socket.on('asbiqhum:answer_result', (data) => { setAnswerResult(data); setTimerRunning(false); setRoomScreen('result'); });
-    socket.on('asbiqhum:time_up', (data) => { setTimeUpInfo(data); setTimerRunning(false); setRoomScreen('result'); });
-    socket.on('asbiqhum:game_over', (data) => { setFinalResults(data); setRoomScreen('gameover'); });
-    socket.on('error', ({ message }) => setError(message));
-    return () => {
-      ['connect','asbiqhum:created','asbiqhum:joined','asbiqhum:player_joined','asbiqhum:player_left',
-       'asbiqhum:question','asbiqhum:buzzed','asbiqhum:answer_result','asbiqhum:time_up','asbiqhum:game_over','error']
-        .forEach(e => socket.off(e));
-      socket.disconnect();
-    };
-  }, [mode]);
+  if (mode === 'room') return <AsbiqhumRoom onExit={() => setMode(null)} />;
 
   // ── Mode selection ──────────────────────────────────────────────────────────
   if (!mode) {
@@ -339,122 +301,12 @@ export default function AsbiqhumPage() {
     }
   }
 
-  // ── ROOM MODE ───────────────────────────────────────────────────────────────
-  const amBuzzed = buzzedInfo?.playerId === myId;
-  const scores = answerResult?.scores || timeUpInfo?.scores || gameState?.players || [];
-
-  if (roomScreen === 'setup') {
-    return (
-      <div className="page asbiq-setup">
-        <button className="back-btn" onClick={() => { setMode(null); setRoomScreen('setup'); }}>← العودة</button>
-        <div className="setup-card card pop-in">
-          <AsbiqLogo small />
-          <input className="input-field" placeholder="اسمك" value={playerName} onChange={e => setPlayerName(e.target.value)} maxLength={20} />
-          <div className="setup-actions">
-            <button className="btn-primary" onClick={() => { if (!playerName.trim()) return setError('أدخل اسمك'); setError(''); socket.emit('asbiqhum:create', { playerName: playerName.trim() }); }}>إنشاء غرفة</button>
-            <span className="divider">أو</span>
-            <div className="join-row">
-              <input className="input-field join-input" placeholder="رمز الغرفة" value={joinCode} onChange={e => setJoinCode(e.target.value.toUpperCase())} maxLength={6} style={{ textAlign: 'center', letterSpacing: 4, fontSize: '1.2rem' }} />
-              <button className="btn-secondary" onClick={() => { if (!playerName.trim()) return setError('أدخل اسمك'); if (!joinCode.trim()) return setError('أدخل رمز الغرفة'); setError(''); socket.emit('asbiqhum:join', { roomCode: joinCode.trim(), playerName: playerName.trim() }); }}>انضم</button>
-            </div>
-          </div>
-          {error && <div className="error-msg shake">{error}</div>}
-        </div>
-      </div>
-    );
-  }
-
-  if (roomScreen === 'lobby') {
-    return (
-      <div className="page asbiq-lobby">
-        <div className="lobby-card card">
-          <h2>غرفة الانتظار</h2>
-          <div className="room-code-display"><span>رمز الغرفة:</span><strong className="room-code">{roomCode}</strong></div>
-          <p className="lobby-hint">شارك الرمز مع أصدقائك للانضمام</p>
-          <div className="players-list">
-            <h3>اللاعبون ({gameState?.players?.length || 0})</h3>
-            {gameState?.players?.map(p => <div key={p.id} className="player-item"><span>{p.id === gameState.host ? '👑 ' : '👤 '}{p.name}</span></div>)}
-          </div>
-          {isHost ? (
-            <button className="btn-primary start-btn" onClick={() => socket.emit('asbiqhum:start')} disabled={gameState?.players?.length < 2}>
-              {gameState?.players?.length < 2 ? 'انتظر لاعباً آخر...' : 'ابدأ اللعبة ⚡'}
-            </button>
-          ) : <p className="waiting-msg pulse">انتظار المضيف لبدء اللعبة...</p>}
-        </div>
-      </div>
-    );
-  }
-
-  if (roomScreen === 'question' || roomScreen === 'buzzed') {
-    const iAmBuzzed = roomScreen === 'buzzed' && amBuzzed;
-    return (
-      <div className="page asbiq-question">
-        <div className="question-header">
-          <span className="q-counter">سؤال {question?.questionNumber} / {question?.totalQuestions}</span>
-          <Timer duration={QUESTION_TIME} running={timerRunning} />
-          <span className="q-category">{question?.question?.category}</span>
-        </div>
-        <div className="question-card card pop-in"><p className="question-text">{question?.question?.text}</p></div>
-        {roomScreen === 'question' && (
-          <button className="asbiq-buzzer asbiq-buzzer-solo" style={pcStyle(0)} onClick={() => socket.emit('asbiqhum:buzz')}>
-            <span className="asbiq-buzzer-cap" />
-            <span className="asbiq-buzzer-name">اسبقهم!</span>
-          </button>
-        )}
-        {roomScreen === 'buzzed' && (
-          <div className="buzzed-info pop-in">
-            <div className="buzzed-banner">{amBuzzed ? '🎯 أنت ضغطت الجرس أولاً!' : `⚡ ${buzzedInfo?.playerName} ضغط الجرس!`}</div>
-            {iAmBuzzed && (
-              <div className="options-grid">
-                {question?.question?.options?.map((opt, i) => (
-                  <button key={i} className="option-btn" onClick={() => { setSelectedAnswer(i); socket.emit('asbiqhum:answer', { answerIndex: i }); }} disabled={selectedAnswer !== null}>{opt}</button>
-                ))}
-              </div>
-            )}
-            {!iAmBuzzed && <p className="waiting-answer pulse">ينتظر إجابة {buzzedInfo?.playerName}...</p>}
-          </div>
-        )}
-        <div className="side-scores"><Scoreboard players={scores} highlightId={myId} /></div>
-      </div>
-    );
-  }
-
-  if (roomScreen === 'result') {
-    const correct = answerResult?.isCorrect;
-    const timeUp = !!timeUpInfo;
-    return (
-      <div className="page asbiq-result">
-        <div className={`result-banner pop-in ${correct ? 'correct' : timeUp ? 'timeout' : 'wrong'}`}>
-          {timeUp ? '⏰ انتهى الوقت!' : correct ? `✅ إجابة صحيحة! +${answerResult.pointsEarned}` : '❌ إجابة خاطئة'}
-        </div>
-        <div className="correct-answer card"><span>الإجابة الصحيحة:</span><strong>{answerResult?.correctAnswer || timeUpInfo?.correctAnswer}</strong></div>
-        <div className="result-scores card"><h3>النقاط</h3><Scoreboard players={scores} highlightId={myId} /></div>
-        <p className="next-hint pulse">السؤال التالي قريباً...</p>
-      </div>
-    );
-  }
-
-  if (roomScreen === 'gameover') {
-    const winner = finalResults?.winner;
-    const isWinner = winner?.id === myId;
-    return (
-      <div className="page asbiq-gameover">
-        <div className="gameover-hero pop-in">
-          <div className="gameover-trophy">{isWinner ? '🏆' : '🎮'}</div>
-          <h1>{isWinner ? 'أنت الفائز!' : `فاز ${winner?.name}!`}</h1>
-        </div>
-        <div className="final-scores card"><h3>النتائج النهائية</h3><Scoreboard players={finalResults?.results || []} highlightId={myId} /></div>
-        <button className="btn-primary" onClick={() => navigate('/')}>العودة للرئيسية</button>
-      </div>
-    );
-  }
-
   return null;
 }
 
 // ─── Presentational pieces ───────────────────────────────────────────────────
 
-function AsbiqLogo({ small }) {
+export function AsbiqLogo({ small }) {
   return (
     <div className={`asbiq-logo ${small ? 'small' : ''}`}>
       <svg className="asbiq-bolt" viewBox="0 0 24 32" aria-hidden="true">
@@ -468,7 +320,7 @@ function AsbiqLogo({ small }) {
   );
 }
 
-function AsbiqHud({ index, total, category, children }) {
+export function AsbiqHud({ index, total, category, children }) {
   return (
     <div className="asbiq-hud">
       <div className="asbiq-hud-meta">
@@ -485,7 +337,7 @@ function AsbiqHud({ index, total, category, children }) {
   );
 }
 
-function AsbiqStrip({ players, active }) {
+export function AsbiqStrip({ players, active }) {
   return (
     <div className="asbiq-strip">
       {players.map((p, i) => (
@@ -499,7 +351,7 @@ function AsbiqStrip({ players, active }) {
   );
 }
 
-function AsbiqVerdict({ kind, title, points, answer }) {
+export function AsbiqVerdict({ kind, title, points, answer }) {
   return (
     <div className={`asbiq-verdict ${kind} pop-in`}>
       <div className="asbiq-verdict-icon">{kind === 'correct' ? '✓' : kind === 'wrong' ? '✕' : '⏱'}</div>
@@ -510,7 +362,7 @@ function AsbiqVerdict({ kind, title, points, answer }) {
   );
 }
 
-function AsbiqRanking({ players, offset = 0 }) {
+export function AsbiqRanking({ players, offset = 0 }) {
   const sorted = [...players].sort((a, b) => b.score - a.score);
   const max = Math.max(1, ...sorted.map(p => p.score));
   return (
@@ -527,7 +379,7 @@ function AsbiqRanking({ players, offset = 0 }) {
   );
 }
 
-function AsbiqPodium({ players }) {
+export function AsbiqPodium({ players }) {
   const sorted = [...players].sort((a, b) => b.score - a.score);
   const top = [sorted[1], sorted[0], sorted[2]];
   const tie = sorted[1] && sorted[1].score === sorted[0].score;

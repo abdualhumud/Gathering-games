@@ -1,7 +1,9 @@
 import { useEffect, useState, useRef } from 'react';
 import './Timer.css';
 
-export default function Timer({ duration, running, onEnd }) {
+// `total` (optional) is the full length of the phase — lets a timer that
+// starts part-way (online rooms) draw the ring from the right point.
+export default function Timer({ duration, running, onEnd, total }) {
   const [timeLeft, setTimeLeft] = useState(duration);
   const intervalRef = useRef(null);
 
@@ -27,7 +29,7 @@ export default function Timer({ duration, running, onEnd }) {
     return () => clearInterval(intervalRef.current);
   }, [running, onEnd]);
 
-  const pct = (timeLeft / duration) * 100;
+  const pct = (timeLeft / (total || duration || 1)) * 100;
   const color = pct > 50 ? 'var(--green)' : pct > 25 ? 'var(--gold)' : 'var(--accent)';
 
   return (

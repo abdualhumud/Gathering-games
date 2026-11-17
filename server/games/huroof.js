@@ -1,251 +1,262 @@
-// حروف (Huroof) - Arabic Letter Grid Game
-// Two teams compete on a grid of Arabic letters
-// Correct answers claim that letter cell for your team
-// First team to connect from one border to the opposite border wins (Hex-style)
-// Team A (green): top-to-bottom connection
-// Team B (orange): left-to-right connection
+// حروف (Huroof) — online hex letter grid, same rules as the local game (2 teams).
+// phase: lobby → pre → buzzing → answering → result → select → pre … → over
+//  • 5×5 hex grid (odd rows shifted right), first question on the centre hex.
+//  • Buzzing (12 s): any player buzzes for their team → that team answers (30 s).
+//  • Wrong / time-out → the other team gets a 15 s steal.  Nobody → hex stays free.
+//  • Correct → the team claims the hex and picks the next one.
+//  • Win: "path" — team 0 connects left↔right, team 1 top↔bottom;
+//         "majority" — most hexes when the grid is full.
+const { BaseGame, isIndex, publicQuestion } = require('./base');
+const { arabicLetters, shuffle, getQuestionsByLetter, getRandomQuestion } = require('../questions');
 
-const { getRandomLetters, getQuestionsByLetter, getRandomQuestion } = require('../questions');
+const N = 5;
+const TOTAL = N * N;
+const CENTER = 12;
+const BUZZER_TIME = 12;
+const ANSWER_TIME = 30;
+const STEAL_TIME = 15;
+const PRE_MS = 1600;
+const RESULT_MS = 2200;
+const STEAL_GAP_MS = 1800;
+const TEAMS = [
+  { name: 'الفريق الأخضر', color: '#22c55e' },
+  { name: 'الفريق البرتقالي', color: '#f97316' },
+];
 
-const GRID_SIZES = { small: 4, medium: 5, large: 6 };
-const ANSWER_TIME = 30; // seconds per question
+function neighbours(idx) {
+  const r = Math.floor(idx / N), c = idx % N;
+  const odd = r % 2 === 1;
+  return [
+    [r, c - 1], [r, c + 1],
+    [r - 1, odd ? c : c - 1], [r - 1, odd ? c + 1 : c],
+    [r + 1, odd ? c : c - 1], [r + 1, odd ? c + 1 : c],
+  ].filter(([rr, cc]) => rr >= 0 && rr < N && cc >= 0 && cc < N).map(([rr, cc]) => rr * N + cc);
+}
 
-class HuroofGame {
-  constructor(roomId, gridSize = 'medium') {
-    this.roomId = roomId;
-    this.gridN = GRID_SIZES[gridSize] || 5;
-    this.players = {}; // socketId -> { name, team, connected }
-    this.teams = {
-      A: { name: 'الفريق الأخضر', color: 'green', members: [] },
-      B: { name: 'الفريق البرتقالي', color: 'orange', members: [] }
-    };
-    this.host = null;
-    this.state = 'lobby'; // lobby | playing | selecting | answering | results
-    this.grid = []; // [{letter, owner: null|'A'|'B', row, col}]
-    this.currentTurn = 'A'; // which team's turn
-    this.selectedCell = null;
-    this.currentQuestion = null;
-    this.questionStartTime = null;
-    this.winner = null;
-    this._initGrid();
+function findPath(grid, team) {
+  const horizontal = team === 0;
+  const isStart = i => (horizontal ? i % N === 0 : i < N);
+  const isEnd = i => (horizontal ? i % N === N - 1 : i >= N * (N - 1));
+  const prev = new Map();
+  const queue = [];
+  grid.forEach(h => { if (h.owner === team && isStart(h.index)) { prev.set(h.index, -1); queue.push(h.index); } });
+  while (queue.length) {
+    const cur = queue.shift();
+    if (isEnd(cur)) {
+      const path = [];
+      for (let p = cur; p !== -1; p = prev.get(p)) path.push(p);
+      return path;
+    }
+    for (const nb of neighbours(cur)) {
+      if (!prev.has(nb) && grid[nb].owner === team) { prev.set(nb, cur); queue.push(nb); }
+    }
+  }
+  return null;
+}
+
+class HuroofGame extends BaseGame {
+  constructor(room, options) {
+    super(room);
+    this.winMode = options.winMode === 'majority' ? 'majority' : 'path';
+    this.usedIds = new Set();
+    this.resetMatch();
   }
 
-  _initGrid() {
-    const letters = getRandomLetters(this.gridN * this.gridN);
-    this.grid = [];
-    for (let row = 0; row < this.gridN; row++) {
-      for (let col = 0; col < this.gridN; col++) {
-        this.grid.push({
-          index: row * this.gridN + col,
-          row,
-          col,
-          letter: letters[row * this.gridN + col],
-          owner: null
-        });
+  resetMatch() {
+    const letters = shuffle(arabicLetters.filter(l => getQuestionsByLetter(l).length > 0)).slice(0, TOTAL);
+    this.grid = Array.from({ length: TOTAL }, (_, i) => ({ index: i, letter: letters[i % letters.length], owner: null }));
+    this.activeIdx = CENTER;
+    this.control = null;        // team that picks the next hex
+    this.answering = null;      // team answering now
+    this.queue = [];            // teams that may still steal
+    this.isSteal = false;
+    this.question = null;
+    this.selected = null;
+    this.result = null;
+    this.winInfo = null;
+  }
+
+  normaliseTeam(team) {
+    if (team === 0 || team === 1) return team;
+    const n = t => this.players().filter(p => p.team === t).length;
+    return n(0) <= n(1) ? 0 : 1;
+  }
+
+  handle(player, type, data) {
+    switch (type) {
+      case 'team': {
+        if (this.phase !== 'lobby') return 'لا يمكن تغيير الفريق بعد البدء';
+        if (data.team !== 0 && data.team !== 1) return 'فريق غير صالح';
+        player.team = data.team;
+        return null;
       }
-    }
-  }
-
-  addPlayer(socketId, name, team) {
-    const assignedTeam = team || (this.teams.A.members.length <= this.teams.B.members.length ? 'A' : 'B');
-    this.players[socketId] = { name, team: assignedTeam, connected: true };
-    this.teams[assignedTeam].members.push(socketId);
-    if (!this.host) this.host = socketId;
-  }
-
-  removePlayer(socketId) {
-    if (this.players[socketId]) {
-      this.players[socketId].connected = false;
-      const team = this.players[socketId].team;
-      this.teams[team].members = this.teams[team].members.filter(id => id !== socketId);
-    }
-    if (this.host === socketId) {
-      const connected = Object.entries(this.players).find(([id, p]) => p.connected && id !== socketId);
-      this.host = connected ? connected[0] : null;
-    }
-  }
-
-  isHost(socketId) {
-    return this.host === socketId;
-  }
-
-  startGame() {
-    this._initGrid();
-    this.state = 'selecting';
-    this.currentTurn = 'A';
-    this.winner = null;
-    return {
-      type: 'game_started',
-      grid: this.grid,
-      gridN: this.gridN,
-      currentTurn: this.currentTurn,
-      teams: this.teams
-    };
-  }
-
-  selectCell(socketId, cellIndex) {
-    if (this.state !== 'selecting') return null;
-    const player = this.players[socketId];
-    if (!player || player.team !== this.currentTurn) return null;
-
-    const cell = this.grid[cellIndex];
-    if (!cell || cell.owner !== null) return null;
-
-    this.selectedCell = cellIndex;
-    this.state = 'answering';
-    this.questionStartTime = Date.now();
-
-    // Get question related to the selected letter
-    const letterQuestions = getQuestionsByLetter(cell.letter);
-    this.currentQuestion = letterQuestions.length > 0
-      ? letterQuestions[Math.floor(Math.random() * letterQuestions.length)]
-      : getRandomQuestion();
-
-    return {
-      type: 'cell_selected',
-      cellIndex,
-      letter: cell.letter,
-      team: this.currentTurn,
-      question: {
-        id: this.currentQuestion.id,
-        text: this.currentQuestion.text,
-        category: this.currentQuestion.category,
-        options: this.currentQuestion.options,
-        letter: cell.letter
-      },
-      timeLimit: ANSWER_TIME
-    };
-  }
-
-  submitAnswer(socketId, answerIndex) {
-    if (this.state !== 'answering') return null;
-    const player = this.players[socketId];
-    if (!player || player.team !== this.currentTurn) return null;
-
-    const selectedOption = this.currentQuestion.options[answerIndex];
-    const isCorrect = selectedOption === this.currentQuestion.answer;
-    const cell = this.grid[this.selectedCell];
-
-    if (isCorrect) {
-      cell.owner = this.currentTurn;
-    }
-
-    const winCheck = isCorrect ? this._checkWin(this.currentTurn) : false;
-    const result = {
-      type: 'answer_result',
-      isCorrect,
-      correctAnswer: this.currentQuestion.answer,
-      cellIndex: this.selectedCell,
-      owner: isCorrect ? this.currentTurn : null,
-      grid: this.grid
-    };
-
-    if (winCheck) {
-      this.winner = this.currentTurn;
-      this.state = 'results';
-      result.winner = this.currentTurn;
-      result.winnerName = this.teams[this.currentTurn].name;
-      result.type = 'game_over';
-    } else {
-      // Switch turns
-      this.currentTurn = this.currentTurn === 'A' ? 'B' : 'A';
-      this.state = 'selecting';
-      result.nextTurn = this.currentTurn;
-    }
-
-    this.selectedCell = null;
-    this.currentQuestion = null;
-    return result;
-  }
-
-  timeUp() {
-    if (this.state !== 'answering') return null;
-    const result = {
-      type: 'time_up',
-      correctAnswer: this.currentQuestion.answer,
-      cellIndex: this.selectedCell,
-      grid: this.grid
-    };
-    // No cell claimed, switch turns
-    this.currentTurn = this.currentTurn === 'A' ? 'B' : 'A';
-    this.state = 'selecting';
-    result.nextTurn = this.currentTurn;
-    this.selectedCell = null;
-    this.currentQuestion = null;
-    return result;
-  }
-
-  // Check if team has a winning path using BFS
-  // Team A wins with top-to-bottom connection (rows 0 to gridN-1)
-  // Team B wins with left-to-right connection (cols 0 to gridN-1)
-  _checkWin(team) {
-    const n = this.gridN;
-    const owned = new Set(
-      this.grid.filter(c => c.owner === team).map(c => c.index)
-    );
-
-    const startCells = team === 'A'
-      ? this.grid.filter(c => c.row === 0 && owned.has(c.index)).map(c => c.index)
-      : this.grid.filter(c => c.col === 0 && owned.has(c.index)).map(c => c.index);
-
-    const visited = new Set();
-    const queue = [...startCells];
-    visited.add(...startCells);
-
-    while (queue.length > 0) {
-      const idx = queue.shift();
-      const cell = this.grid[idx];
-
-      // Check if reached opposite border
-      if (team === 'A' && cell.row === n - 1) return true;
-      if (team === 'B' && cell.col === n - 1) return true;
-
-      // Get neighbors (4-directional + 2 diagonal for Hex-like)
-      const neighbors = this._getNeighbors(cell.row, cell.col);
-      for (const nIdx of neighbors) {
-        if (owned.has(nIdx) && !visited.has(nIdx)) {
-          visited.add(nIdx);
-          queue.push(nIdx);
+      case 'settings': {
+        if (!this.isHost(player) || this.phase !== 'lobby') return 'للمضيف قبل البدء فقط';
+        if (data.winMode === 'path' || data.winMode === 'majority') this.winMode = data.winMode;
+        return null;
+      }
+      case 'start': {
+        if (!this.isHost(player)) return 'المضيف فقط يبدأ اللعبة';
+        if (this.phase !== 'lobby') return 'اللعبة بدأت';
+        for (const t of [0, 1]) {
+          if (!this.room.connectedPlayers().some(p => p.team === t)) return `يحتاج ${TEAMS[t].name} لاعباً واحداً على الأقل`;
         }
+        this.resetMatch();
+        this.goPre(CENTER);
+        return null;
       }
+      case 'buzz': {
+        if (this.phase !== 'buzzing') return null;   // too late: ignore quietly
+        this.answering = player.team;
+        this.queue = [1 - player.team];
+        this.isSteal = false;
+        this.buzzedBy = player.name;
+        this.phase = 'answering';
+        this.countdown(ANSWER_TIME, () => this.resolve(false, true, null));
+        return null;
+      }
+      case 'answer': {
+        if (this.phase !== 'answering') return 'لا يوجد سؤال';
+        if (player.team !== this.answering) return 'ليس دور فريقك';
+        if (!isIndex(data.index, this.question.options.length)) return 'اختيار غير صالح';
+        this.answeredBy = player.name;
+        this.resolve(this.question.options[data.index] === this.question.answer, false, data.index);
+        return null;
+      }
+      case 'skip': {
+        // a bad question can be swapped while buzzing (host only)
+        if (!this.isHost(player) || this.phase !== 'buzzing') return 'غير متاح الآن';
+        this.openQuestion(this.activeIdx);
+        return null;
+      }
+      case 'select': {
+        if (this.phase !== 'select') return 'انتظر';
+        if (this.control !== null && player.team !== this.control && !this.isHost(player)) return 'ليس دور فريقك';
+        if (!isIndex(data.index, TOTAL) || this.grid[data.index].owner !== null) return 'اختر حرفاً متاحاً';
+        this.goPre(data.index);
+        return null;
+      }
+      case 'restart': {
+        if (!this.isHost(player) || this.phase !== 'over') return 'غير متاح الآن';
+        this.stopTimer();
+        this.resetMatch();
+        this.phase = 'lobby';
+        return null;
+      }
+      default: return 'إجراء غير معروف';
     }
-    return false;
   }
 
-  _getNeighbors(row, col) {
-    const n = this.gridN;
-    const neighbors = [];
-    const dirs = [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, 1], [1, -1]]; // Hex adjacency
-    for (const [dr, dc] of dirs) {
-      const nr = row + dr;
-      const nc = col + dc;
-      if (nr >= 0 && nr < n && nc >= 0 && nc < n) {
-        neighbors.push(nr * n + nc);
-      }
-    }
-    return neighbors;
+  goPre(idx) {
+    this.activeIdx = idx;
+    this.result = null;
+    this.selected = null;
+    this.phase = 'pre';
+    this.after(PRE_MS, () => this.openQuestion(idx));
   }
 
-  getState() {
+  drawQuestion(letter) {
+    const pool = getQuestionsByLetter(letter);
+    const fresh = pool.filter(q => !this.usedIds.has(q.id));
+    const q = shuffle(fresh.length ? fresh : pool)[0] || getRandomQuestion();
+    this.usedIds.add(q.id);
+    return q;
+  }
+
+  openQuestion(idx) {
+    this.question = this.drawQuestion(this.grid[idx].letter);
+    this.selected = null;
+    this.result = null;
+    this.answering = null;
+    this.isSteal = false;
+    this.queue = [];
+    this.buzzedBy = null;
+    this.answeredBy = null;
+    this.phase = 'buzzing';
+    this.countdown(BUZZER_TIME, () => this.unresolved({ noBuzz: true }));
+  }
+
+  resolve(correct, timeout, index) {
+    this.stopTimer();
+    this.selected = index;
+    if (correct) {
+      const winner = this.answering;
+      this.grid[this.activeIdx].owner = winner;
+      this.result = { correct: true, team: winner, answer: this.question.answer, by: this.answeredBy };
+      this.phase = 'result';
+      const path = this.winMode === 'path' ? findPath(this.grid, winner) : null;
+      this.after(RESULT_MS, () => {
+        if (path) { this.winInfo = { team: winner, path }; this.finish(); return; }
+        this.goSelect(winner);
+      });
+      return;
+    }
+    const res = { correct: false, timeout, answer: this.question.answer, team: this.answering, by: this.answeredBy };
+    if (this.queue.length) {
+      this.result = res;
+      this.phase = 'result';
+      this.after(STEAL_GAP_MS, () => {
+        this.answering = this.queue.shift();
+        this.isSteal = true;
+        this.selected = null;
+        this.result = null;
+        this.answeredBy = null;
+        this.phase = 'answering';
+        this.countdown(STEAL_TIME, () => this.resolve(false, true, null));
+      });
+    } else {
+      this.unresolved(res);
+    }
+  }
+
+  unresolved(res) {
+    this.result = { answer: this.question.answer, ...res };
+    this.phase = 'result';
+    this.after(RESULT_MS, () => this.goSelect(this.control));   // hex stays free
+  }
+
+  goSelect(control) {
+    this.result = null;
+    this.selected = null;
+    this.question = null;
+    if (!this.grid.some(h => h.owner === null)) { this.finishMajority(); return; }
+    this.control = control;
+    this.activeIdx = -1;
+    this.phase = 'select';
+  }
+
+  finishMajority() {
+    const counts = [0, 1].map(t => this.grid.filter(h => h.owner === t).length);
+    const max = Math.max(...counts);
+    const leaders = [0, 1].filter(t => counts[t] === max);
+    this.winInfo = { team: leaders[0], tie: leaders.length > 1, leaders, majority: true };
+    this.finish();
+  }
+
+  finish() { this.stopTimer(); this.phase = 'over'; }
+
+  view() {
+    const showAnswer = this.phase === 'result';
     return {
-      roomId: this.roomId,
-      state: this.state,
+      phase: this.phase,
+      winMode: this.winMode,
+      teams: TEAMS,
       grid: this.grid,
-      gridN: this.gridN,
-      currentTurn: this.currentTurn,
-      teams: this.teams,
-      players: this.players,
-      host: this.host,
-      winner: this.winner,
-      selectedCell: this.selectedCell,
-      currentQuestion: this.currentQuestion ? {
-        id: this.currentQuestion.id,
-        text: this.currentQuestion.text,
-        category: this.currentQuestion.category,
-        options: this.currentQuestion.options
-      } : null
+      activeIdx: this.activeIdx,
+      control: this.control,
+      answering: this.answering,
+      isSteal: this.isSteal,
+      buzzedBy: this.buzzedBy || null,
+      question: this.question && (this.phase === 'buzzing' || this.phase === 'answering' || this.phase === 'result')
+        ? { ...publicQuestion(this.question), ...(showAnswer ? { answer: this.question.answer } : {}) }
+        : null,
+      selected: this.selected,
+      result: this.result,
+      winInfo: this.winInfo,
+      counts: [0, 1].map(t => this.grid.filter(h => h.owner === t).length),
+      timer: this.timerView(),
     };
   }
 }
 
-module.exports = { HuroofGame, ANSWER_TIME };
+module.exports = { HuroofGame, ANSWER_TIME, neighbours, findPath };

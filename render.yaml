@@ -1,0 +1,18 @@
+# Render Blueprint — one free web service that runs the game server AND hosts
+# the site (same origin, so online rooms work with no extra setup).
+# Deploy: https://render.com/deploy?repo=https://github.com/abdualhumud/Gathering-games
+services:
+  - type: web
+    name: gathering-games
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm --prefix client install && npm --prefix client run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      # Allow the GitHub Pages site to reach this server
+      - key: CORS_ORIGIN
+        value: "*"

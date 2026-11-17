@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**ألعاب التجمعات** is an Arabic-language social party games platform. Three games are implemented, each with a local (offline, same-device) mode and an online room mode via WebSockets.
+**ألعاب التجمعات** is an Arabic-language social party games platform. Three games are implemented, each with a local (offline, same-device) mode and an online room mode via WebSockets (server-authoritative, see «Online rooms»).
 
 ---
 
@@ -38,6 +38,11 @@ Build for production:
 cd client && npm run build   # outputs to client/dist/
 ```
 
+Room tests (real Socket.IO clients, timers shrunk via `GG_TIME_SCALE`):
+```bash
+npm run test:rooms
+```
+
 Preview built output:
 ```bash
 cd client && npm run preview  # serves on :4173 by default
@@ -50,21 +55,24 @@ cd client && npm run preview  # serves on :4173 by default
 ```
 /
 ├── server/
-│   ├── index.js                 # Express + Socket.IO server, room stores
+│   ├── index.js                 # Express + Socket.IO: room:* protocol, static site at /Gathering-games/
+│   ├── rooms.js                 # RoomManager: codes, seats/tokens, rejoin, per-player state, cleanup
 │   ├── questions.js             # Aggregator + normalisation pipeline (single source of truth)
 │   ├── bank/*.txt               # MAIN bank — compact one-line-per-question files (~3,500 q)
 │   ├── bank/loader.js           # Parses bank/*.txt
 │   ├── questions_*.js           # Original category files (reviewed; bad ids in EXCLUDED_IDS)
 │   ├── questions_huroof_letters.js # Extra questions for rare Huroof letters (ض ظ ذ ز)
-│   └── games/
-│       ├── asbiqhum.js          # Speed-buzzer trivia game logic
-│       ├── huroof.js            # Hex letter-grid game logic
-│       └── moneyboard.js        # Jeopardy-style money board logic
+│   └── games/                   # online engines (same rules as local mode)
+│       ├── base.js              # timers (countdown/after), publicQuestion (no answer)
+│       ├── asbiqhum.js
+│       ├── huroof.js
+│       └── moneyboard.js
 └── client/
     └── src/
         ├── App.jsx              # HashRouter + 4 routes
         ├── index.css            # Global design tokens + shared components
-        ├── socket.js            # Socket.IO client singleton
+        ├── socket.js            # server URL resolution + shared socket (getSocket/setServerUrl)
+        ├── rooms/               # online mode: useRoom hook, RoomKit UI, <Game>Room screens
         ├── questions.js         # Client helpers (shuffle, pickFresh, seen-memory) over data/questions.json
         ├── pages/
         │   ├── Home.jsx / Home.css
@@ -288,13 +296,41 @@ Each game's CSS scopes its custom variables to its own page classes to avoid con
 
 ---
 
-## Socket.IO Event Namespaces
+## Online rooms
 
-| Game | Prefix | Key events |
-|---|---|---|
-| Asbiqhum | `asbiqhum:` | create, join, start, buzz, answer, time_up, game_over |
-| Huroof | `huroof:` | create, join, start, select_hex, buzz, answer, steal, game_over |
-| MoneyBoard | `money:` | create, join, start, select_cell, answer, steal_chance, answer_result, game_over |
+**Model: server-authoritative state sync.** Clients send requests with acks; after every
+change the server sends each player its own view as `room:state`. Clients only render state,
+so reconnecting = "send me the state again".
+
+| Client → server (ack `{ok, error?}`) | Purpose |
+|---|---|
+| `room:create {game, name, team?, options?}` | new room (5-char code, no 0/O/1/I/L) → `{code, playerId, token}` |
+| `room:join {game, code, name, team?}` | join a lobby (duplicate names get a suffix) |
+| `room:rejoin {game, code, token}` | re-attach to the same seat after refresh / lost connection |
+| `room:leave` · `room:action {type, …}` | leave · game action (`start`, `buzz`, `answer`, `pick`, `power`, `select`, `settings`, `team`, `restart`, host `kick`/`skip`/`adjust`/`next`) |
+
+Games: `asbiqhum` · `money` · `huroof`. Server → client also `room:kicked`, `room:replaced`.
+
+- **Seats:** public player `id` + secret `token` (stored per game in `localStorage` key
+  `gg-room-<game>`); the page reopens the room automatically if a seat exists or the URL has
+  `?room=CODE` (invite link). In the lobby a disconnected seat is freed after 30 s; mid-game it is kept.
+  Host is handed over when the host is gone for 30 s. Empty rooms are deleted after 15 min.
+- **Safety:** every handler is wrapped (bad payloads never crash the process), names cleaned
+  (≤ 20 chars), indices validated, 25 requests/s per socket (`GG_RATE_MAX`), answers are never
+  sent before the question resolves (`publicQuestion`).
+- **Timers** live on the server; state carries `timer {key, duration, remaining}` →
+  `timerProps()` → `<Timer total=…>`.
+- **Rules:** same as local. Asbiqhum online: a wrong answer locks only that player and the clock
+  resumes for the others. MoneyBoard online: `choices` mode, same 5 powers (`friend` adds 30 s).
+  Huroof online: 2 teams, any player buzzes for their team, the controlling team (or host) picks the next hex.
+
+**Where the server runs** — client `socket.js` resolves the URL: saved «عنوان الخادم» in the
+room screen → `VITE_SERVER_URL` (Pages build reads repo variable `SERVER_URL`) → `:3001` on
+localhost → same origin (when the server hosts the site). On `*.github.io` with nothing set the
+room screen shows «لم يُضبط خادم» and lets the user paste an address.
+`render.yaml` deploys one free Render web service that builds the client and serves both the
+site (`/Gathering-games/`) and the sockets. Free instances sleep after ~15 min idle (first
+request takes ~1 min); rooms are in memory and reset on restart/deploy.
 
 ---
 
@@ -321,7 +357,9 @@ Each game's CSS scopes its custom variables to its own page classes to avoid con
 
 5. **Questions client/server mirroring** — `server/questions.js` is the only source; the client reads the generated `client/src/data/questions.json`. Run `npm run build:questions` after any change.
 
-6. **Local-first architecture** — All three games work fully offline in local mode without the Node.js server. Online room mode requires the server on port 3001. This matters for GitHub Pages deployment (only static files hosted — room mode requires a separately deployed server).
+6. **Local-first architecture** — All three games work fully offline in local mode without the Node.js server. Online room mode needs the game server (GitHub Pages only hosts static files — deploy `render.yaml` and set the `SERVER_URL` repo variable, or open the site from the server's own URL).
+
+9. **Online = state sync, not events** — never add per-event client logic for rooms; change the engine and its `view()`, and render from `room.state`. Keep online rules identical to the local hook of the same game.
 
 7. **Huroof letter matching** — `letter` is computed from the answer by the normaliser (ignoring "ال"). Every letter must keep ≥ ~10 questions; rare letters live in `questions_huroof_letters.js`.
 

@@ -16,6 +16,21 @@ Hex-style board game for two teams: claim letter cells by answering trivia.
 - Configurable grid: 4×4, 5×5, or 6×6
 - Strategic cell selection (offense vs. defense)
 
+## Online rooms (اللعب أونلاين)
+
+The live site (GitHub Pages) is static, so online rooms need the game server running somewhere.
+
+**Easiest — Render (free):**
+1. Open https://render.com/deploy?repo=https://github.com/abdualhumud/Gathering-games and sign in with GitHub.
+2. Accept the blueprint (`render.yaml`) → it builds and starts `gathering-games`.
+3. The site **and** the rooms then both work at `https://<your-service>.onrender.com`.
+4. Optional, so the GitHub Pages site uses the server too: repo **Settings → Secrets and variables → Actions → Variables → New** `SERVER_URL = https://<your-service>.onrender.com`, then re-run the Pages workflow.
+   (Players can also paste the address in the room screen under «عنوان الخادم».)
+
+Free Render instances sleep after ~15 minutes without traffic; the first visit wakes them in about a minute.
+
+Run the room tests: `npm run test:rooms`.
+
 ## Tech Stack
 
 | Layer | Technology |

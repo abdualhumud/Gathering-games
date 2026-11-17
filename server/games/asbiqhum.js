@@ -1,179 +1,169 @@
-// اسبقهم (Asbiqhum) - "Beat Them" Speed Buzzer Trivia Game
-// Players race to buzz in first and answer trivia questions
-// Points = base points × (timeRemaining / totalTime)
+// اسبقهم (Asbiqhum) — online speed-buzzer trivia.
+// phase: lobby → question ⇄ buzzed → result → … → over
+//  • Everyone sees the question; the first to buzz gets 10 s to answer.
+//  • Correct: points by speed (100 × time left / 20, min 10).
+//  • Wrong:   −20 (never below 0) and that player is locked out; the clock
+//             resumes for the others if time is left.
+const { BaseGame, isIndex, publicQuestion } = require('./base');
+const { questions, shuffle, withShuffledOptions } = require('../questions');
 
-const { getRandomQuestions } = require('../questions');
-
-const QUESTION_TIME = 20; // seconds per question
+const QUESTION_TIME = 20;
+const ANSWER_TIME = 10;
+const RESULT_MS = 4000;
 const BASE_POINTS = 100;
-const WRONG_ANSWER_PENALTY = -20;
-const QUESTIONS_PER_GAME = 10;
+const WRONG_PENALTY = -20;
+const QUESTION_OPTIONS = [5, 10, 15, 20];
 
-class AsbiqhumGame {
-  constructor(roomId) {
-    this.roomId = roomId;
-    this.players = {}; // socketId -> { name, score, buzzed }
-    this.host = null;
-    this.state = 'lobby'; // lobby | playing | question | buzzed | results
-    this.questions = [];
-    this.currentQuestionIndex = -1;
-    this.currentQuestion = null;
-    this.buzzedPlayer = null;
-    this.questionStartTime = null;
-    this.timer = null;
-    this.questionTimer = null;
+class AsbiqhumGame extends BaseGame {
+  constructor(room, options) {
+    super(room);
+    this.total = QUESTION_OPTIONS.includes(options.questions) ? options.questions : 10;
+    this.usedIds = new Set();
+    this.scores = {};
+    this.resetRound();
   }
 
-  addPlayer(socketId, name) {
-    this.players[socketId] = { name, score: 0, buzzed: false, connected: true };
-    if (!this.host) this.host = socketId;
+  resetRound() {
+    this.qs = [];
+    this.qIndex = -1;
+    this.current = null;
+    this.buzzerId = null;
+    this.locked = new Set();
+    this.result = null;
+    this.timeLeftMs = 0;    // question clock when paused by a buzz
   }
 
-  removePlayer(socketId) {
-    if (this.players[socketId]) {
-      this.players[socketId].connected = false;
+  onJoin(p) { this.scores[p.id] = 0; }
+  onLeave(p) { delete this.scores[p.id]; }
+
+  handle(player, type, data) {
+    switch (type) {
+      case 'settings': {
+        if (!this.isHost(player) || this.phase !== 'lobby') return 'للمضيف قبل البدء فقط';
+        if (QUESTION_OPTIONS.includes(data.questions)) this.total = data.questions;
+        return null;
+      }
+      case 'start': return this.start(player);
+      case 'buzz': return this.buzz(player);
+      case 'answer': return this.answer(player, data.index);
+      case 'next': {
+        if (!this.isHost(player) || this.phase !== 'result') return 'غير متاح الآن';
+        this.advance();
+        return null;
+      }
+      case 'restart': {
+        if (!this.isHost(player) || this.phase !== 'over') return 'غير متاح الآن';
+        this.stopTimer();
+        this.resetRound();
+        this.phase = 'lobby';
+        return null;
+      }
+      default: return 'إجراء غير معروف';
     }
-    // If host disconnects, assign new host
-    if (this.host === socketId) {
-      const connected = Object.entries(this.players).find(([id, p]) => p.connected && id !== socketId);
-      this.host = connected ? connected[0] : null;
-    }
   }
 
-  isHost(socketId) {
-    return this.host === socketId;
-  }
-
-  startGame() {
-    this.questions = getRandomQuestions(QUESTIONS_PER_GAME);
-    this.currentQuestionIndex = -1;
-    this.state = 'playing';
-    // Reset scores
-    Object.values(this.players).forEach(p => { p.score = 0; });
-    return this.nextQuestion();
+  start(player) {
+    if (!this.isHost(player)) return 'المضيف فقط يبدأ اللعبة';
+    if (this.phase !== 'lobby') return 'اللعبة بدأت';
+    if (this.room.connectedPlayers().length < 2) return 'تحتاج لاعبَين على الأقل';
+    let pool = questions.filter(q => !this.usedIds.has(q.id));
+    if (pool.length < this.total) { this.usedIds.clear(); pool = questions; }
+    this.resetRound();
+    this.qs = shuffle(pool).slice(0, this.total).map(withShuffledOptions);
+    this.qs.forEach(q => this.usedIds.add(q.id));
+    for (const id of Object.keys(this.scores)) this.scores[id] = 0;
+    this.nextQuestion();
+    return null;
   }
 
   nextQuestion() {
-    if (this.timer) clearTimeout(this.timer);
-    this.currentQuestionIndex++;
-    if (this.currentQuestionIndex >= this.questions.length) {
-      return this.endGame();
-    }
-    this.currentQuestion = this.questions[this.currentQuestionIndex];
-    this.buzzedPlayer = null;
-    this.questionStartTime = Date.now();
-    this.state = 'question';
-    // Reset buzz flags
-    Object.values(this.players).forEach(p => { p.buzzed = false; });
-
-    return {
-      type: 'new_question',
-      questionNumber: this.currentQuestionIndex + 1,
-      totalQuestions: this.questions.length,
-      question: {
-        id: this.currentQuestion.id,
-        text: this.currentQuestion.text,
-        category: this.currentQuestion.category,
-        options: this.currentQuestion.options
-      },
-      timeLimit: QUESTION_TIME
-    };
+    this.qIndex++;
+    if (this.qIndex >= this.qs.length) { this.finish(); return; }
+    this.current = this.qs[this.qIndex];
+    this.buzzerId = null;
+    this.locked = new Set();
+    this.result = null;
+    this.openQuestion(QUESTION_TIME);
   }
 
-  buzz(socketId) {
-    if (this.state !== 'question') return null;
-    if (this.players[socketId].buzzed) return null;
-
-    const timeElapsed = (Date.now() - this.questionStartTime) / 1000;
-    this.buzzedPlayer = socketId;
-    this.state = 'buzzed';
-
-    return {
-      type: 'buzzed',
-      playerId: socketId,
-      playerName: this.players[socketId].name,
-      timeElapsed: timeElapsed.toFixed(2)
-    };
+  openQuestion(seconds) {
+    this.phase = 'question';
+    this.buzzerId = null;
+    this.countdown(seconds, () => this.showResult({ kind: 'timeout' }));
   }
 
-  submitAnswer(socketId, answerIndex) {
-    if (this.state !== 'buzzed') return null;
-    if (this.buzzedPlayer !== socketId) return null;
+  buzz(player) {
+    if (this.phase !== 'question') return null;          // late buzz: silently ignored
+    if (this.locked.has(player.id)) return 'أجبت خطأ في هذا السؤال';
+    this.timeLeftMs = this.msLeft();
+    this.buzzerId = player.id;
+    this.phase = 'buzzed';
+    this.countdown(ANSWER_TIME, () => this.wrong(player.id, null, true));
+    return null;
+  }
 
-    const timeElapsed = (Date.now() - this.questionStartTime) / 1000;
-    const timeRemaining = Math.max(0, QUESTION_TIME - timeElapsed);
-    const selectedOption = this.currentQuestion.options[answerIndex];
-    const isCorrect = selectedOption === this.currentQuestion.answer;
-
-    let pointsEarned = 0;
-    if (isCorrect) {
-      pointsEarned = Math.round(BASE_POINTS * (timeRemaining / QUESTION_TIME));
-      pointsEarned = Math.max(pointsEarned, 10); // minimum 10 points for correct answer
-      this.players[socketId].score += pointsEarned;
+  answer(player, index) {
+    if (this.phase !== 'buzzed' || this.buzzerId !== player.id) return 'ليس دورك للإجابة';
+    if (!isIndex(index, this.current.options.length)) return 'اختيار غير صالح';
+    const correct = this.current.options[index] === this.current.answer;
+    if (correct) {
+      const points = Math.max(10, Math.round(BASE_POINTS * (this.timeLeftMs / 1000) / QUESTION_TIME));
+      this.scores[player.id] = (this.scores[player.id] || 0) + points;
+      this.showResult({ kind: 'correct', playerId: player.id, points, selected: index });
     } else {
-      pointsEarned = WRONG_ANSWER_PENALTY;
-      this.players[socketId].score = Math.max(0, this.players[socketId].score + WRONG_ANSWER_PENALTY);
+      this.wrong(player.id, index, false);
     }
-
-    this.players[socketId].buzzed = true;
-
-    const result = {
-      type: 'answer_result',
-      playerId: socketId,
-      playerName: this.players[socketId].name,
-      isCorrect,
-      pointsEarned,
-      correctAnswer: this.currentQuestion.answer,
-      scores: this.getScoreboard()
-    };
-
-    return result;
+    return null;
   }
 
-  timeUp() {
-    if (this.state !== 'question' && this.state !== 'buzzed') return null;
+  wrong(playerId, index, timedOut) {
+    this.scores[playerId] = Math.max(0, (this.scores[playerId] || 0) + WRONG_PENALTY);
+    this.locked.add(playerId);
+    const others = this.room.connectedPlayers().filter(p => !this.locked.has(p.id));
+    const lastWrong = { playerId, selected: index, timedOut };
+    if (others.length && this.timeLeftMs > 2000) {
+      this.lastWrong = lastWrong;
+      this.openQuestion(Math.ceil(this.timeLeftMs / 1000));
+    } else {
+      this.showResult({ kind: 'wrong', points: WRONG_PENALTY, ...lastWrong });
+    }
+  }
+
+  showResult(res) {
+    this.phase = 'result';
+    this.lastWrong = null;
+    this.result = { ...res, correctAnswer: this.current.answer };
+    this.after(RESULT_MS, () => this.advance());
+  }
+
+  advance() {
+    if (this.qIndex + 1 >= this.qs.length) this.finish();
+    else this.nextQuestion();
+  }
+
+  finish() {
+    this.stopTimer();
+    this.phase = 'over';
+    this.current = null;
+  }
+
+  onDisconnect(p) {
+    // Buzzed player vanished → count it as a miss right away.
+    if (this.phase === 'buzzed' && this.buzzerId === p.id) this.wrong(p.id, null, true);
+  }
+
+  view() {
     return {
-      type: 'time_up',
-      correctAnswer: this.currentQuestion.answer,
-      scores: this.getScoreboard()
-    };
-  }
-
-  endGame() {
-    this.state = 'results';
-    const sorted = Object.entries(this.players)
-      .map(([id, p]) => ({ id, name: p.name, score: p.score }))
-      .sort((a, b) => b.score - a.score);
-
-    return {
-      type: 'game_over',
-      results: sorted,
-      winner: sorted[0]
-    };
-  }
-
-  getScoreboard() {
-    return Object.entries(this.players)
-      .map(([id, p]) => ({ id, name: p.name, score: p.score }))
-      .sort((a, b) => b.score - a.score);
-  }
-
-  getState() {
-    return {
-      roomId: this.roomId,
-      state: this.state,
-      players: this.getScoreboard(),
-      currentQuestion: this.currentQuestion ? {
-        id: this.currentQuestion.id,
-        text: this.currentQuestion.text,
-        category: this.currentQuestion.category,
-        options: this.currentQuestion.options,
-        number: this.currentQuestionIndex + 1,
-        total: this.questions.length
-      } : null,
-      buzzedPlayer: this.buzzedPlayer,
-      buzzedPlayerName: this.buzzedPlayer ? this.players[this.buzzedPlayer]?.name : null,
-      host: this.host
+      phase: this.phase,
+      total: this.total,
+      qIndex: this.qIndex,
+      question: this.phase === 'lobby' || this.phase === 'over' ? null : publicQuestion(this.current),
+      buzzerId: this.buzzerId,
+      locked: [...this.locked],
+      lastWrong: this.lastWrong || null,
+      result: this.result,
+      scores: this.scores,
+      timer: this.timerView(),
     };
   }
 }

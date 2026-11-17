@@ -825,3 +825,11 @@
   .step-2 .asbiq-step-block { height: 88px; }
   .step-3 .asbiq-step-block { height: 64px; }
 }
+
+/* ── online room bits ── */
+.asbiq-panel.rk-lobby { max-width: 600px; }
+.asbiq-seg { display: flex; gap: 4px; padding: 4px; border-radius: 30px; background: rgba(0, 0, 0, 0.4); border: 1px solid rgba(0, 212, 255, 0.2); }
+.asbiq-seg button { border: none; background: none; color: #a9bdd6; font-family: inherit; font-weight: 900; padding: 6px 14px; border-radius: 30px; cursor: pointer; }
+.asbiq-seg button.on { background: #00d4ff; color: #021422; }
+.asbiq-room-note { margin: 0; padding: 10px 16px; border-radius: 14px; background: rgba(0, 212, 255, 0.08); border: 1px solid rgba(0, 212, 255, 0.25); color: #bfefff; font-weight: 800; text-align: center; }
+.asbiq-next { flex: none; width: auto; padding: 10px 26px; }

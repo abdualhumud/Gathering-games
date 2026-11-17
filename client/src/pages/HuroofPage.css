@@ -482,3 +482,15 @@
 .huroof-team-row { flex-wrap: wrap; }
 .huroof-team-row .team-name-input { flex: 1; min-width: 0; }
 .huroof-team-row .team-goal { flex-basis: 100%; text-align: right; padding-inline-start: 50px; margin-top: -4px; }
+
+/* ── online room ── */
+.huroof-online-btn { width: 100%; display: flex; flex-direction: column; align-items: center; gap: 2px; margin-top: 8px; }
+.huroof-online-btn small { font-size: 0.75rem; opacity: 0.7; font-weight: 500; }
+.huroof-room-logo { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.huroof-room-logo h1 { margin: 0; color: var(--huroof-accent, #22c55e); font-size: 2rem; font-weight: 900; }
+.huroof-room-hex { font-size: 2.6rem; line-height: 1; color: var(--huroof-accent, #22c55e); filter: drop-shadow(0 0 14px rgba(34, 197, 94, 0.5)); }
+.huroof-room-kicker { font-size: 0.8rem; color: #94a3b8; font-weight: 700; }
+.huroof-setup .rk-lobby { max-width: 620px; gap: 14px; }
+.huroof-my-team { font-size: 0.78rem; font-weight: 900; padding: 4px 10px; border-radius: 20px; border: 1px solid; white-space: nowrap; }
+.opt-btn.opt-picked { outline: 2px solid var(--huroof-accent, #22c55e); }
+.huroof-room-buzz { grid-column: 1 / -1; min-height: 96px; font-size: 1.4rem !important; }

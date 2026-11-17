@@ -8,6 +8,9 @@ import Timer from '../components/Timer';
 import HUROOF_THEMES, {
   getSavedTheme, saveTheme, buildCustomTheme, applyThemeCSS,
 } from '../data/huroof-themes';
+import HuroofRoom from '../rooms/HuroofRoom';
+import { hasSeat } from '../rooms/useRoom';
+import { inviteCode } from '../rooms/roomUtils';
 import './HuroofPage.css';
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -38,10 +41,10 @@ const DEFAULT_NAMES  = [
 // Path goals (2-team "path" mode — the classic حروف rule):
 //  team 0 connects the left edge to the right edge  (↔)
 //  team 1 connects the top edge to the bottom edge  (↕)
-const PATH_GOAL = ['↔ يربط اليمين باليسار', '↕ يربط الأعلى بالأسفل'];
+export const PATH_GOAL = ['↔ يربط اليمين باليسار', '↕ يربط الأعلى بالأسفل'];
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
-function rgba(hex, a) {
+export function rgba(hex, a) {
   const r = parseInt(hex.slice(1,3),16);
   const g = parseInt(hex.slice(3,5),16);
   const b = parseInt(hex.slice(5,7),16);
@@ -104,7 +107,7 @@ function drawQuestion(letter, usedIds) {
 }
 
 // ── Setup Screen ───────────────────────────────────────────────────────────────
-function SetupScreen({ onStart, navigate }) {
+function SetupScreen({ onStart, onOnline, navigate }) {
   const [numTeams,   setNumTeams]   = useState(2);
   const [names,      setNames]      = useState([...DEFAULT_NAMES]);
   const [colors,     setColors]     = useState([...DEFAULT_COLORS]);
@@ -216,13 +219,16 @@ function SetupScreen({ onStart, navigate }) {
         <button className="btn-green start-game-btn" onClick={start}>
           ابدأ اللعبة ⬡
         </button>
+        <button className="btn-secondary huroof-online-btn" onClick={onOnline}>
+          🌐 غرفة أونلاين <small>فريقان، كل لاعب يضغط الجرس من جواله</small>
+        </button>
       </div>
     </div>
   );
 }
 
 // ── Hex Grid ───────────────────────────────────────────────────────────────────
-function HexGrid({ grid, teams, activeIdx, selectableIdxs, onSelect, phase, pathMode, winPath }) {
+export function HexGrid({ grid, teams, activeIdx, selectableIdxs, onSelect, phase, pathMode, winPath }) {
   const pathSet = new Set(winPath || []);
   const frame = pathMode ? {
     '--edge-h': teams[0]?.color, // left/right edges → team 0
@@ -277,7 +283,7 @@ function HexGrid({ grid, teams, activeIdx, selectableIdxs, onSelect, phase, path
 }
 
 // ── Score Bar ──────────────────────────────────────────────────────────────────
-function ScoreBar({ teams, counts, controlIdx, pathMode }) {
+export function ScoreBar({ teams, counts, controlIdx, pathMode }) {
   return (
     <div className="score-bar">
       {teams.map((t, i) => (
@@ -673,11 +679,13 @@ export default function HuroofPage() {
   const navigate = useNavigate();
   const [config, setConfig] = useState(null); // { teams, pathMode }
   const [gameKey, setGameKey] = useState(0);
+  const [online, setOnline] = useState(() => !!(inviteCode() || hasSeat('huroof')));
 
   useEffect(() => { applyThemeCSS(getSavedTheme()); }, []);
 
+  if (online) return <HuroofRoom onExit={() => setOnline(false)} />;
   if (!config) {
-    return <SetupScreen onStart={(c) => { setConfig(c); setGameKey(k => k + 1); }} navigate={navigate} />;
+    return <SetupScreen onStart={(c) => { setConfig(c); setGameKey(k => k + 1); }} onOnline={() => setOnline(true)} navigate={navigate} />;
   }
   return (
     <GameScreen

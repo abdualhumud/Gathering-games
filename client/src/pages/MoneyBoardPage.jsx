@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { socket } from '../socket';
+import MoneyRoom from '../rooms/MoneyRoom';
+import { hasSeat } from '../rooms/useRoom';
+import { inviteCode } from '../rooms/roomUtils';
 import { questions as allQuestions, categoryCounts, pickFresh, markSeen, shuffle } from '../questions';
 import Timer from '../components/Timer';
 import './MoneyBoardPage.css';
@@ -16,11 +18,11 @@ const POINTS    = [200, 400, 600];
 const DIFF_LABEL = ['سهل', 'متوسط', 'صعب'];
 const ANSWER_TIME = 30;
 const STEAL_TIME  = 15;
-const TEAM_NAMES  = { A: 'الفريق الأول', B: 'الفريق الثاني' };
-const TEAM_COLORS = { A: 'team-a', B: 'team-b' };
+export const TEAM_NAMES  = { A: 'الفريق الأول', B: 'الفريق الثاني' };
+export const TEAM_COLORS = { A: 'team-a', B: 'team-b' };
 
 // ── Super Powers (matching asbghm.com) ───────────────────────────────────────
-const SUPER_POWERS = [
+export const SUPER_POWERS = [
   { id: 'double', icon: '2x',  name: 'مضاعفة النقاط', desc: 'ضاعف نقاطك إذا أجبت صح' },
   { id: 'two',    icon: '✌️',  name: 'إجابتين',        desc: 'فرصتان للإجابة بدل واحدة' },
   { id: 'hafra',  icon: '🔄',  name: 'الحفرة',          desc: 'أجب صح وانقص نقاط خصمك' },
@@ -401,57 +403,11 @@ function useLocalGame() {
 // ── Main Component ────────────────────────────────────────────────────────────
 export default function MoneyBoardPage() {
   const navigate = useNavigate();
-  const [mode, setMode] = useState(null); // null | 'local' | 'room'
+  const [mode, setMode] = useState(() => (inviteCode() || hasSeat('money') ? 'room' : null)); // null | 'local' | 'room'
   const [modOpen, setModOpen] = useState(false); // moderator panel
   const local = useLocalGame();
 
-  // Room state
-  const [roomScreen, setRoomScreen] = useState('setup'); // setup | lobby | category_select | game | question | gameover
-  const [playerName, setPlayerName] = useState('');
-  const [selectedTeam, setSelectedTeam] = useState('A');
-  const [roomCode, setRoomCode] = useState('');
-  const [joinCode, setJoinCode] = useState('');
-  const [isHost, setIsHost] = useState(false);
-  const [gameState, setGameState] = useState(null);
-  const [myId, setMyId] = useState(null);
-  const [error, setError] = useState('');
-  const [roomSelected, setRoomSelected] = useState([]); // host's category picks
-  const [roomCellData, setRoomCellData] = useState(null); // { colIdx, rowIdx, question, points, activeTeam }
-  const [roomResult, setRoomResult] = useState(null);
-  const [roomSteal, setRoomSteal] = useState(null);
-  const [roomGameOver, setRoomGameOver] = useState(null);
-  const [timerRunning, setTimerRunning] = useState(false);
-  const [stealTimerRunning, setStealTimer] = useState(false);
-  const [selAns, setSelAns] = useState(null);
-
-  // Room socket
-  useEffect(() => {
-    if (mode !== 'room') return;
-    socket.connect();
-    setMyId(socket.id);
-    socket.on('connect', () => setMyId(socket.id));
-    socket.on('money:created', ({ roomCode: rc, isHost: h, state }) => { setRoomCode(rc); setIsHost(h); setGameState(state); setRoomScreen('lobby'); });
-    socket.on('money:joined',  ({ roomCode: rc, isHost: h, state }) => { setRoomCode(rc); setIsHost(h); setGameState(state); setRoomScreen('lobby'); });
-    socket.on('money:player_joined', ({ state }) => setGameState(state));
-    socket.on('money:player_left',   ({ state }) => setGameState(state));
-    socket.on('money:game_started',  ({ state }) => { setGameState(state); setRoomCellData(null); setRoomResult(null); setRoomSteal(null); setSelAns(null); setRoomScreen('game'); });
-    socket.on('money:cell_selected', (data) => { setRoomCellData(data); setRoomSteal(null); setRoomResult(null); setSelAns(null); setTimerRunning(true); setStealTimer(false); setGameState(s => ({ ...s, activeTeam: data.activeTeam, state: 'question' })); setRoomScreen('question'); });
-    socket.on('money:steal_chance',  (data) => { setRoomSteal(data); setTimerRunning(false); setStealTimer(true); setGameState(s => ({ ...s, activeTeam: data.stealTeam, state: 'steal' })); setSelAns(null); });
-    socket.on('money:answer_result', (data) => {
-      setTimerRunning(false); setStealTimer(false);
-      setRoomResult(data);
-      setGameState(s => ({ ...s, teams: data.teams, board: data.board, currentTurn: data.nextTurn, activeTeam: null, state: data.gameOver ? 'gameover' : 'playing' }));
-      if (!data.gameOver) setTimeout(() => { setRoomScreen('game'); setRoomCellData(null); setRoomResult(null); setRoomSteal(null); setSelAns(null); }, 2500);
-    });
-    socket.on('money:game_over', (data) => { setRoomGameOver(data); setTimerRunning(false); setStealTimer(false); setRoomScreen('gameover'); });
-    socket.on('error', ({ message }) => setError(message));
-    return () => {
-      ['connect','money:created','money:joined','money:player_joined','money:player_left',
-       'money:game_started','money:cell_selected','money:steal_chance','money:answer_result',
-       'money:game_over','error'].forEach(e => socket.off(e));
-      socket.disconnect();
-    };
-  }, [mode]);
+  if (mode === 'room') return <MoneyRoom onExit={() => setMode(null)} />;
 
   // ── Mode selector ─────────────────────────────────────────────────────────
   if (!mode) return (
@@ -739,203 +695,14 @@ export default function MoneyBoardPage() {
     }
   }
 
-  // ══════════════════════════════════════════════════════════════════════════
-  // ROOM MODE
-  // ══════════════════════════════════════════════════════════════════════════
-  const myTeam = gameState?.players?.[myId]?.team;
-  const isMyTurn = myTeam === gameState?.currentTurn;
-  const roomActiveTeam = gameState?.activeTeam;
-  const isMyTeamActive = myTeam === roomActiveTeam;
-
-  if (roomScreen === 'setup') return (
-    <div className="page mb-setup">
-      <button className="back-btn" onClick={() => { setMode(null); setRoomScreen('setup'); }}>← العودة</button>
-      <div className="setup-card card pop-in">
-        <div className="setup-icon">💰</div>
-        <h1>لوحة المال — غرفة</h1>
-        <input className="input-field" placeholder="اسمك" value={playerName} onChange={e => setPlayerName(e.target.value)} maxLength={20} />
-        <div className="team-select">
-          <label>اختر فريقك:</label>
-          <div className="team-btns">
-            <button className={`team-btn team-a-btn ${selectedTeam === 'A' ? 'selected' : ''}`} onClick={() => setSelectedTeam('A')}>🔵 الفريق الأول</button>
-            <button className={`team-btn team-b-btn ${selectedTeam === 'B' ? 'selected' : ''}`} onClick={() => setSelectedTeam('B')}>🟠 الفريق الثاني</button>
-          </div>
-        </div>
-        <div className="setup-actions">
-          <button className="btn-primary" onClick={() => { if (!playerName.trim()) return setError('أدخل اسمك'); setError(''); socket.emit('money:create', { playerName: playerName.trim(), team: selectedTeam }); }}>إنشاء غرفة</button>
-          <span className="divider">أو</span>
-          <div className="join-row">
-            <input className="input-field join-input room-code-input" placeholder="رمز الغرفة" value={joinCode} onChange={e => setJoinCode(e.target.value.toUpperCase())} maxLength={6} />
-            <button className="btn-secondary" onClick={() => { if (!playerName.trim()) return setError('أدخل اسمك'); if (!joinCode.trim()) return setError('أدخل رمز الغرفة'); setError(''); socket.emit('money:join', { roomCode: joinCode.trim(), playerName: playerName.trim(), team: selectedTeam }); }}>انضم</button>
-          </div>
-        </div>
-        {error && <div className="error-msg shake">{error}</div>}
-      </div>
-    </div>
-  );
-
-  if (roomScreen === 'lobby') {
-    const players = Object.values(gameState?.players || {});
-    const teamA = players.filter(p => p.team === 'A');
-    const teamB = players.filter(p => p.team === 'B');
-    const canStart = teamA.length >= 1 && teamB.length >= 1;
-    return (
-      <div className="page mb-lobby">
-        <div className="lobby-card card">
-          <h2>غرفة الانتظار</h2>
-          <div className="room-code-display"><span>رمز الغرفة:</span><strong className="room-code">{roomCode}</strong></div>
-          <div className="teams-preview">
-            <div className="team-preview"><h4>🔵 الفريق الأول ({teamA.length})</h4>{teamA.map(p => <div key={p.name} className="player-item">{p.name}</div>)}</div>
-            <div className="team-preview"><h4>🟠 الفريق الثاني ({teamB.length})</h4>{teamB.map(p => <div key={p.name} className="player-item">{p.name}</div>)}</div>
-          </div>
-          {isHost ? (
-            canStart ? (
-              <button className="btn-primary start-btn" onClick={() => setRoomScreen('category_select')}>اختر الفئات ←</button>
-            ) : (
-              <p className="waiting-msg">انتظار لاعب في كل فريق...</p>
-            )
-          ) : <p className="waiting-msg pulse">انتظار المضيف...</p>}
-        </div>
-      </div>
-    );
-  }
-
-  if (roomScreen === 'category_select') return (
-    <div className="page mb-setup">
-      <div className="setup-card card pop-in" style={{ maxWidth: 560 }}>
-        <h2>اختر 6 فئات ({roomSelected.length}/6)</h2>
-        <div className="cat-grid">
-          {VALID_CATEGORIES.map(cat => (
-            <button
-              key={cat}
-              className={`cat-chip ${roomSelected.includes(cat) ? 'selected' : ''}`}
-              onClick={() => setRoomSelected(prev => prev.includes(cat) ? prev.filter(c => c !== cat) : prev.length < 6 ? [...prev, cat] : prev)}
-              disabled={!roomSelected.includes(cat) && roomSelected.length >= 6}
-            >
-              {cat}
-              {roomSelected.includes(cat) && <span className="cat-num">{roomSelected.indexOf(cat) + 1}</span>}
-            </button>
-          ))}
-        </div>
-        <button
-          className="btn-primary"
-          style={{ marginTop: 8 }}
-          onClick={() => socket.emit('money:start', { selectedCategories: roomSelected })}
-          disabled={roomSelected.length !== 6}
-        >
-          {roomSelected.length < 6 ? `اختر ${6 - roomSelected.length} فئات أخرى` : 'ابدأ اللعبة 💰'}
-        </button>
-      </div>
-    </div>
-  );
-
-  if (roomScreen === 'game') {
-    const board = gameState?.board ? gameState.board.map((col, ci) => ({
-      category: col.category,
-      cells: col.cells.map(c => ({ ...c, question: null })), // no question data in board state
-    })) : null;
-    return (
-      <div className="mb-game-page">
-        <MoneyBoardHeader
-          teams={{ A: { money: gameState?.teams?.A?.money || 0, name: 'الفريق الأول' }, B: { money: gameState?.teams?.B?.money || 0, name: 'الفريق الثاني' } }}
-          currentTurn={gameState?.currentTurn}
-          phase={isMyTurn ? 'pick' : 'wait'}
-          myTeam={myTeam}
-        />
-        {board && (
-          <BoardGrid
-            board={gameState.board.map(col => ({
-              category: col.category,
-              cells: col.cells.map(c => ({ ...c, question: null })),
-            }))}
-            activeCell={null}
-            onPickCell={(ci, ri) => { if (!isMyTurn) return; socket.emit('money:select_cell', { colIdx: ci, rowIdx: ri }); }}
-            canPick={isMyTurn && gameState?.state === 'playing'}
-            currentTurn={gameState?.currentTurn}
-          />
-        )}
-        {roomResult && (
-          <ResultFlash info={roomResult} teamNames={{ A: 'الفريق الأول', B: 'الفريق الثاني' }} />
-        )}
-        {!isMyTurn && <p className="waiting-msg pulse">انتظار الفريق الآخر ليختار...</p>}
-      </div>
-    );
-  }
-
-  if (roomScreen === 'question') {
-    const isSteal = gameState?.state === 'steal';
-    const activeTeamName = roomActiveTeam === 'A' ? 'الفريق الأول' : 'الفريق الثاني';
-    const canAnswer = isMyTeamActive;
-    return (
-      <div className="mb-question-page">
-        <div className="q-page-header">
-          <MoneyScores teams={{ A: { money: gameState?.teams?.A?.money || 0, name: 'الفريق الأول' }, B: { money: gameState?.teams?.B?.money || 0, name: 'الفريق الثاني' } }} />
-          <div className={`points-badge ${isSteal ? 'steal-badge' : ''}`}>
-            {isSteal ? `🔀 سرقة — ${activeTeamName}` : `💰 ${roomCellData?.points} ريال`}
-          </div>
-          <Timer
-            duration={isSteal ? STEAL_TIME : ANSWER_TIME}
-            running={isSteal ? stealTimerRunning : timerRunning}
-            key={isSteal ? 'steal' : 'answer'}
-          />
-        </div>
-
-        {isSteal && (
-          <div className="steal-banner pop-in">
-            ⚡ فرصة السرقة! — {activeTeamName}
-          </div>
-        )}
-
-        <div className="question-card card pop-in">
-          {roomCellData != null && gameState?.board?.[roomCellData.colIdx]?.category && (
-            <p className="question-category-tag">{gameState.board[roomCellData.colIdx].category}</p>
-          )}
-          <p className="question-text">{roomCellData?.question?.text}</p>
-        </div>
-
-        {canAnswer ? (
-          <div className="options-grid">
-            {roomCellData?.question?.options?.map((opt, i) => (
-              <button key={i} className={`option-btn ${selAns === i ? 'answered' : ''}`}
-                onClick={() => { setSelAns(i); socket.emit('money:answer', { answerIndex: i }); }}
-                disabled={selAns !== null}>
-                <span className="opt-key">{OPT_KEYS[i]}</span>
-                <span className="opt-text">{opt}</span>
-              </button>
-            ))}
-          </div>
-        ) : (
-          <p className="waiting-msg pulse">ينتظر إجابة {activeTeamName}...</p>
-        )}
-
-        {roomResult && <ResultFlash info={roomResult} teamNames={{ A: 'الفريق الأول', B: 'الفريق الثاني' }} />}
-      </div>
-    );
-  }
-
-  if (roomScreen === 'gameover') {
-    const aM = roomGameOver?.teams?.A?.money || 0, bM = roomGameOver?.teams?.B?.money || 0;
-    const winner = roomGameOver?.winner; // 'A' | 'B' | 'tie'
-    return (
-      <GameOverScreen
-        teams={{ A: { money: aM, name: 'الفريق الأول' }, B: { money: bM, name: 'الفريق الثاني' } }}
-        winner={winner === 'tie' ? null : winner}
-        isTie={winner === 'tie'}
-        myTeam={myTeam}
-        onReset={() => navigate('/')}
-        onHome={() => navigate('/')}
-      />
-    );
-  }
-
   return null;
 }
 
-const OPT_KEYS = ['أ', 'ب', 'ج', 'د'];
+export const OPT_KEYS = ['أ', 'ب', 'ج', 'د'];
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
-function MoneyBoardHeader({ teams, currentTurn, phase, myTeam }) {
+export function MoneyBoardHeader({ teams, currentTurn, phase, myTeam }) {
   const pickingName = teams[currentTurn]?.name;
   const pillText = phase === 'pick'
     ? <>دور <b>{pickingName}</b> — اختر سؤالاً</>
@@ -951,7 +718,7 @@ function MoneyBoardHeader({ teams, currentTurn, phase, myTeam }) {
   );
 }
 
-function MoneyScores({ teams, currentTurn, myTeam }) {
+export function MoneyScores({ teams, currentTurn, myTeam }) {
   return (
     <div className="money-scores">
       {['A', 'B'].map(t => (
@@ -967,7 +734,7 @@ function MoneyScores({ teams, currentTurn, myTeam }) {
   );
 }
 
-function BoardGrid({ board, activeCell, onPickCell, canPick, currentTurn }) {
+export function BoardGrid({ board, activeCell, onPickCell, canPick, currentTurn }) {
   if (!board) return null;
   return (
     <div className="mb-board-frame">
@@ -1015,7 +782,7 @@ function BoardGrid({ board, activeCell, onPickCell, canPick, currentTurn }) {
   );
 }
 
-function ResultFlash({ info, teamNames }) {
+export function ResultFlash({ info, teamNames }) {
   const winnerName = info.winner ? teamNames[info.winner] : null;
   return (
     <div className={`result-flash pop-in ${info.isCorrect ? 'correct' : 'wrong'}`}>
@@ -1030,7 +797,7 @@ function ResultFlash({ info, teamNames }) {
 }
 
 // ── Moderator Panel ────────────────────────────────────────────────────────────
-function ModeratorPanel({ teams, onAdjust, onClose }) {
+export function ModeratorPanel({ teams, onAdjust, onClose }) {
   const [customA, setCustomA] = useState('');
   const [customB, setCustomB] = useState('');
   const QUICK = [100, 200, 400, 600];
@@ -1079,7 +846,7 @@ function ModeratorPanel({ teams, onAdjust, onClose }) {
   );
 }
 
-function GameOverScreen({ teams, winner, isTie, myTeam, stats, onReset, onHome }) {
+export function GameOverScreen({ teams, winner, isTie, myTeam, stats, onReset, onHome }) {
   const aM = teams.A.money, bM = teams.B.money;
   const winnerName = winner ? teams[winner]?.name : null;
   const isMyTeamWin = myTeam && myTeam === winner;
