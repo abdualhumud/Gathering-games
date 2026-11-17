@@ -32,6 +32,7 @@ const healthQuestions = require('./questions_health');
 const entertainmentQuestions = require('./questions_entertainment');
 const huroofLetterQuestions = require('./questions_huroof_letters');
 const { loadBank } = require('./bank/loader');
+const { reviewedDifficulty, REVIEW_EXCLUDED } = require('./difficulty');
 
 // Legacy inline questions kept for backwards compatibility
 const legacyQuestions = [
@@ -372,9 +373,13 @@ function normText(t) {
 function normalize(list) {
   const seen = new Set();
   const out = [];
-  for (const raw of list) {
+  for (let raw of list) {
     if (!raw || !raw.text || !Array.isArray(raw.options) || raw.options.length < 2) continue;
     if (raw.id < 5000 && EXCLUDED_IDS.has(raw.id)) continue;
+    if (raw.id < 200000 && REVIEW_EXCLUDED.has(raw.id)) continue;
+    // Tajawal has no ﷺ ligature glyph — spell it out.
+    const expand = v => String(v).replace(/\s*ﷺ/g, ' صلى الله عليه وسلم');
+    raw = { ...raw, text: expand(raw.text), answer: expand(raw.answer ?? ''), options: raw.options.map(expand) };
     const key = normText(raw.text);
     if (seen.has(key)) continue;
     seen.add(key);
@@ -388,7 +393,9 @@ function normalize(list) {
       options,
       category: CATEGORY_ALIASES[raw.category] || raw.category,
       letter: answerLetter(answer),
-      difficulty: [1, 2, 3].includes(raw.difficulty) ? raw.difficulty : 2,
+      difficulty: raw.id >= 200000 && [1, 2, 3].includes(raw.difficulty)
+        ? raw.difficulty
+        : reviewedDifficulty(raw.id),
     });
   }
   // guarantee unique ids

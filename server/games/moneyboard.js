@@ -11,7 +11,8 @@ const { questions, shuffle, withShuffledOptions } = require('../questions');
 const VALID_CATEGORIES = [...new Set(questions.map(q => q.category))]
   .filter(cat => questions.filter(q => q.category === cat).length >= 6);
 
-const POINTS = [200, 400, 600, 800, 1000, 1200];
+// 6 per category: 2 × 200 (easy), 2 × 400 (medium), 2 × 600 (hard)
+const POINTS = [200, 400, 600, 200, 400, 600]; // same order as the client board
 const ANSWER_TIME = 30; // seconds
 const STEAL_TIME  = 15; // seconds
 const EXTRA_TIME  = 15; // seconds added by extraTime super power
@@ -67,8 +68,8 @@ class MoneyBoardGame {
       return {
         category: cat,
         cells: POINTS.map((pts, i) => {
-          // 6 rows → difficulty 1,1,2,2,3,3 (easy → hard), with fallbacks
-          const wanted = Math.min(3, Math.floor(i / 2) + 1);
+          // 200 → easy, 400 → medium, 600 → hard (fallback: any question of the category)
+          const wanted = (i % 3) + 1;
           const q = pick(pool.filter(x => x.difficulty === wanted))
             || pick(pool) || pick(questions);
           if (q) used.add(q.id);

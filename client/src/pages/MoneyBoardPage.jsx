@@ -39,8 +39,9 @@ const freshStats = () => ({ A: { correct: 0, steals: 0 }, B: { correct: 0, steal
  * this device hasn't seen recently, with options shuffled (the correct answer
  * is no longer always the first option).
  */
-function buildLocalBoard(selectedCats, perCat = 3) {
-  const points = perCat === 6 ? [...POINTS, ...POINTS] : POINTS;
+// Each category: 6 questions — 2 × 200 (سهل), 2 × 400 (متوسط), 2 × 600 (صعب).
+function buildLocalBoard(selectedCats) {
+  const points = [...POINTS, ...POINTS];
   const used = new Set();
   const board = selectedCats.map(cat => {
     const pool = allQuestions.filter(q => q.category === cat);
@@ -101,11 +102,10 @@ function useLocalGame() {
   const [isTwoAnswers,   setIsTwoAnswers]    = useState(false); // إجابتين active
   const [isHafra,        setIsHafra]         = useState(false); // الحفرة active
 
-  const [boardSize, setBoardSize]   = useState(3);         // questions per category: 3 (18) or 6 (36)
   const [answerMode, setAnswerMode] = useState('choices'); // 'choices' | 'host'
   const [revealed, setRevealed]     = useState(false);     // host mode: answer shown
 
-  const totalCells = board ? board.reduce((n, col) => n + col.cells.length, 0) : selected.length * boardSize;
+  const totalCells = board ? board.reduce((n, col) => n + col.cells.length, 0) : selected.length * 6;
 
   const randomCategories = () => setSelected(shuffle(VALID_CATEGORIES).slice(0, 6));
   const clearCategories  = () => setSelected([]);
@@ -119,7 +119,7 @@ function useLocalGame() {
   };
 
   const startGame = () => {
-    const b = buildLocalBoard(selected, boardSize);
+    const b = buildLocalBoard(selected);
     setBoard(b);
     setTeams({ A: { money: 0 }, B: { money: 0 } });
     setTurn('A');
@@ -385,7 +385,7 @@ function useLocalGame() {
     screen, teamAName, setTeamAName, teamBName, setTeamBName,
     selected, toggleCategory, startGame, randomCategories, clearCategories,
     wrongOpts, attempt, stats,
-    boardSize, setBoardSize, answerMode, setAnswerMode, revealed, revealAnswer, judge, originalTeam,
+    answerMode, setAnswerMode, revealed, revealAnswer, judge, originalTeam,
     board, teams, currentTurn, activeTeam, phase,
     activeCell, pickCell, currentQuestion, currentPoints,
     submitAnswer, timeUp, timerRunning, selectedAnswer,
@@ -457,16 +457,21 @@ export default function MoneyBoardPage() {
   if (!mode) return (
     <div className="page mb-setup">
       <button className="back-btn" onClick={() => navigate('/')}>← العودة</button>
-      <div className="setup-card card pop-in">
-        <div className="setup-icon">💰</div>
-        <h1>لوحة المال</h1>
-        <p className="setup-desc">فريقان يتنافسان — اختر فئة وصعوبة وأجب بشكل صحيح لجمع أكبر قدر من الريالات</p>
-        <div className="mode-buttons">
-          <button className="btn-primary mode-btn" onClick={() => setMode('local')}>
-            🏠 لعب محلي <small>نفس الجهاز — بدون إنترنت</small>
+      <div className="mb-stage-card pop-in">
+        <div className="mb-marquee">
+          <span className="mb-marquee-kicker">مسابقة الفريقين</span>
+          <h1 className="mb-logo">لوحة <span>المال</span></h1>
+          <div className="mb-logo-coins" aria-hidden="true"><i>200</i><i>400</i><i>600</i></div>
+        </div>
+        <p className="mb-tagline">٦ فئات · ٣٦ سؤالاً · كل ما ارتفع المبلغ صعب السؤال</p>
+        <div className="mb-mode-tiles">
+          <button className="mb-mode-tile primary" onClick={() => setMode('local')}>
+            <span className="mb-mode-title">لعب محلي</span>
+            <span className="mb-mode-sub">شاشة واحدة للجميع — بدون إنترنت</span>
           </button>
-          <button className="btn-secondary mode-btn" onClick={() => setMode('room')}>
-            🌐 غرفة أونلاين <small>أجهزة منفصلة — يتطلب خادماً</small>
+          <button className="mb-mode-tile" onClick={() => setMode('room')}>
+            <span className="mb-mode-title">غرفة أونلاين</span>
+            <span className="mb-mode-sub">كل لاعب على جهازه — يتطلب خادماً</span>
           </button>
         </div>
       </div>
@@ -481,15 +486,19 @@ export default function MoneyBoardPage() {
     if (local.screen === 'setup') return (
       <div className="page mb-setup">
         <button className="back-btn" onClick={() => setMode(null)}>← العودة</button>
-        <div className="setup-card card pop-in">
-          <div className="setup-icon">💰</div>
-          <h1>لوحة المال — محلي</h1>
+        <div className="mb-stage-card mb-setup-card pop-in">
+          <div className="mb-marquee">
+            <span className="mb-marquee-kicker">مسابقة الفريقين</span>
+            <h1 className="mb-logo">لوحة <span>المال</span></h1>
+            <div className="mb-logo-coins" aria-hidden="true"><i>200</i><i>400</i><i>600</i></div>
+          </div>
 
           <div className="team-names-row">
             <div className="team-name-field team-a-field">
               <label>{TEAM_NAMES.A}</label>
               <input className="input-field" value={local.teamAName} onChange={e => local.setTeamAName(e.target.value)} maxLength={20} />
             </div>
+            <span className="mb-vs">ضد</span>
             <div className="team-name-field team-b-field">
               <label>{TEAM_NAMES.B}</label>
               <input className="input-field" value={local.teamBName} onChange={e => local.setTeamBName(e.target.value)} maxLength={20} />
@@ -497,13 +506,6 @@ export default function MoneyBoardPage() {
           </div>
 
           <div className="mb-options">
-            <div className="mb-option-group">
-              <span className="mb-option-label">حجم اللوحة</span>
-              <div className="mb-seg">
-                <button className={local.boardSize === 3 ? 'on' : ''} onClick={() => local.setBoardSize(3)}>18 سؤال</button>
-                <button className={local.boardSize === 6 ? 'on' : ''} onClick={() => local.setBoardSize(6)}>36 سؤال</button>
-              </div>
-            </div>
             <div className="mb-option-group">
               <span className="mb-option-label">طريقة الإجابة</span>
               <div className="mb-seg">
@@ -520,7 +522,7 @@ export default function MoneyBoardPage() {
 
           <div className="cat-select-section">
             <div className="cat-select-head">
-              <h3>اختر 6 فئات ({local.selected.length}/6)</h3>
+              <h3>اختر ٦ فئات <span className="cat-count">{local.selected.length}/6</span></h3>
               <div className="cat-quick-btns">
                 <button className="cat-quick-btn" onClick={local.randomCategories}>🎲 عشوائي</button>
                 {local.selected.length > 0 && (
@@ -536,21 +538,28 @@ export default function MoneyBoardPage() {
                   onClick={() => local.toggleCategory(cat)}
                   disabled={!local.selected.includes(cat) && local.selected.length >= 6}
                 >
-                  {cat}
-                  <span className="cat-q-badge">{CATEGORY_Q_COUNT[cat]}</span>
+                  <span className="cat-name">{cat}</span>
+                  <span className="cat-q-badge">{CATEGORY_Q_COUNT[cat]} سؤال</span>
                   {local.selected.includes(cat) && <span className="cat-num">{local.selected.indexOf(cat) + 1}</span>}
                 </button>
               ))}
             </div>
           </div>
 
-          <button
-            className="btn-primary start-btn-inline"
-            onClick={local.startGame}
-            disabled={local.selected.length !== 6}
-          >
-            {local.selected.length < 6 ? `اختر ${6 - local.selected.length} فئات أخرى` : 'ابدأ اللعبة 💰'}
-          </button>
+          <div className="mb-start-bar">
+            <div className="mb-slots">
+              {[0, 1, 2, 3, 4, 5].map(i => (
+                <span key={i} className={`mb-slot ${local.selected[i] ? 'filled' : ''}`}>{local.selected[i] || i + 1}</span>
+              ))}
+            </div>
+            <button
+              className="mb-start-btn start-btn-inline"
+              onClick={local.startGame}
+              disabled={local.selected.length !== 6}
+            >
+              {local.selected.length < 6 ? `اختر ${6 - local.selected.length} فئات أخرى` : 'ابدأ اللعبة'}
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -600,7 +609,7 @@ export default function MoneyBoardPage() {
           <div className="q-page-header">
             <MoneyScores teams={{ A: { ...local.teams.A, name: local.teamAName }, B: { ...local.teams.B, name: local.teamBName } }} />
             <div className={`points-badge ${isSteal ? 'steal-badge' : ''}`}>
-              {isSteal ? `🔀 سرقة — ${teamName}` : `💰 ${local.currentPoints} ريال`}
+              {isSteal ? `سرقة — ${teamName}` : <>{local.currentPoints}<small>ريال</small></>}
             </div>
             <Timer
               duration={isSteal ? STEAL_TIME : ANSWER_TIME}
@@ -611,7 +620,7 @@ export default function MoneyBoardPage() {
           </div>
 
           {isSteal && (
-            <div className="steal-banner pop-in">⚡ فرصة السرقة! — {teamName}</div>
+            <div className="steal-banner pop-in">فرصة السرقة — {teamName}</div>
           )}
 
           {/* Active power indicators */}
@@ -650,20 +659,20 @@ export default function MoneyBoardPage() {
           {/* Call-a-Friend overlay timer */}
           {local.friendTimer && (
             <div className="friend-timer-banner pop-in">
-              📞 وقت الاتصال بصديق —
+              📞 وقت الاتصال بصديق
               <Timer duration={30} running={true} onEnd={() => local.setFriendTimer(false)} key="friend" />
             </div>
           )}
 
           <div className="question-card card pop-in">
-            {catName && <p className="question-category-tag">{catName}</p>}
+            {catName && <p className="question-category-tag">{catName} · <b>{local.activeCell ? local.board[local.activeCell.colIdx].cells[local.activeCell.rowIdx].points : ''} ريال</b></p>}
             <p className="question-text">{local.currentQuestion?.text}</p>
           </div>
 
           {local.answerMode === 'host' ? (
             <div className="host-panel">
               {!local.revealed ? (
-                <button className="btn-gold host-reveal-btn" onClick={local.revealAnswer}>👁 إظهار الإجابة</button>
+                <button className="btn-gold host-reveal-btn" onClick={local.revealAnswer}>إظهار الإجابة</button>
               ) : (
                 <>
                   <div className="host-answer pop-in">
@@ -698,7 +707,8 @@ export default function MoneyBoardPage() {
                   className={`option-btn ${cls}`}
                   onClick={() => local.submitAnswer(i)}
                   disabled={local.selectedAnswer !== null || tried || revealed}>
-                  {opt}
+                  <span className="opt-key">{OPT_KEYS[i]}</span>
+                  <span className="opt-text">{opt}</span>
                 </button>
               );
             })}
@@ -889,7 +899,8 @@ export default function MoneyBoardPage() {
               <button key={i} className={`option-btn ${selAns === i ? 'answered' : ''}`}
                 onClick={() => { setSelAns(i); socket.emit('money:answer', { answerIndex: i }); }}
                 disabled={selAns !== null}>
-                {opt}
+                <span className="opt-key">{OPT_KEYS[i]}</span>
+                <span className="opt-text">{opt}</span>
               </button>
             ))}
           </div>
@@ -920,19 +931,22 @@ export default function MoneyBoardPage() {
   return null;
 }
 
+const OPT_KEYS = ['أ', 'ب', 'ج', 'د'];
+
 // ── Sub-components ────────────────────────────────────────────────────────────
 
 function MoneyBoardHeader({ teams, currentTurn, phase, myTeam }) {
   const pickingName = teams[currentTurn]?.name;
   const pillText = phase === 'pick'
-    ? `🎯 دور ${pickingName} — اختر سؤالاً`
+    ? <>دور <b>{pickingName}</b> — اختر سؤالاً</>
     : phase === 'wait'
-      ? `⏳ انتظار ${pickingName}...`
-      : `🎯 ${pickingName}`;
+      ? <>انتظار <b>{pickingName}</b>…</>
+      : <b>{pickingName}</b>;
   return (
     <div className="mb-header">
+      <div className="mb-header-logo">لوحة <span>المال</span></div>
       <MoneyScores teams={teams} currentTurn={currentTurn} myTeam={myTeam} />
-      <div className={`turn-pill ${TEAM_COLORS[currentTurn]}`}>{pillText}</div>
+      <div className={`turn-pill ${TEAM_COLORS[currentTurn]}`}><i className="turn-dot" />{pillText}</div>
     </div>
   );
 }
@@ -944,8 +958,8 @@ function MoneyScores({ teams, currentTurn, myTeam }) {
         <div key={t} className={`money-score-box ${TEAM_COLORS[t]} ${currentTurn === t ? 'active-turn' : ''} ${myTeam === t ? 'my-team' : ''}`}>
           <span className="score-team-name">{teams[t]?.name}</span>
           <span className="score-money">
-            <span className="money-icon">💰</span>
-            {(teams[t]?.money || 0).toLocaleString('ar-SA')} ريال
+            {(teams[t]?.money || 0).toLocaleString('en-US')}
+            <small>ريال</small>
           </span>
         </div>
       ))}
@@ -956,6 +970,7 @@ function MoneyScores({ teams, currentTurn, myTeam }) {
 function BoardGrid({ board, activeCell, onPickCell, canPick, currentTurn }) {
   if (!board) return null;
   return (
+    <div className="mb-board-frame">
     <div className="mb-board">
       {/* Category headers */}
       <div className="mb-board-row mb-headers">
@@ -979,9 +994,7 @@ function BoardGrid({ board, activeCell, onPickCell, canPick, currentTurn }) {
                   disabled={cell.answered || !canPick}
                 >
                   {cell.answered ? (
-                    <span className="cell-winner-icon">
-                      {cell.winner === 'A' ? '🔵' : cell.winner === 'B' ? '🟠' : '✖'}
-                    </span>
+                    <span className="cell-claimed">{cell.points}</span>
                   ) : (
                     <>
                       <span className="cell-points">{cell.points}</span>
@@ -998,6 +1011,7 @@ function BoardGrid({ board, activeCell, onPickCell, canPick, currentTurn }) {
         </div>
       ))}
     </div>
+    </div>
   );
 }
 
@@ -1006,7 +1020,7 @@ function ResultFlash({ info, teamNames }) {
   return (
     <div className={`result-flash pop-in ${info.isCorrect ? 'correct' : 'wrong'}`}>
       {info.isCorrect
-        ? <>✅ {winnerName} — +{info.points.toLocaleString('ar-SA')} ريال{info.hafra ? ` 🔄 −${info.hafraPoints} من الخصم` : ''}</>
+        ? <>✅ {winnerName} — +{info.points.toLocaleString('en-US')} ريال{info.hafra ? ` 🔄 −${info.hafraPoints} من الخصم` : ''}</>
         : info.correctAnswer
           ? `❌ إجابة خاطئة — الصواب: ${info.correctAnswer}`
           : '❌ إجابة خاطئة'
@@ -1030,7 +1044,7 @@ function ModeratorPanel({ teams, onAdjust, onClose }) {
         {['A', 'B'].map(t => (
           <div key={t} className={`mod-team-section mod-team-${t.toLowerCase()}`}>
             <div className="mod-team-name">{teams[t]?.name}</div>
-            <div className="mod-money">💰 {(teams[t]?.money || 0).toLocaleString('ar-SA')} ريال</div>
+            <div className="mod-money">💰 {(teams[t]?.money || 0).toLocaleString('en-US')} ريال</div>
             <div className="mod-btns">
               {QUICK.map(v => (
                 <button key={v} className="mod-add-btn" onClick={() => onAdjust(t, v)}>+{v}</button>
@@ -1079,7 +1093,7 @@ function GameOverScreen({ teams, winner, isTie, myTeam, stats, onReset, onHome }
         {['A', 'B'].map(t => (
           <div key={t} className={`final-row ${TEAM_COLORS[t]} ${winner === t ? 'winner-row' : ''}`}>
             <span className="final-team-name">{teams[t]?.name}</span>
-            <span className="final-money">💰 {(teams[t]?.money || 0).toLocaleString('ar-SA')} ريال</span>
+            <span className="final-money">💰 {(teams[t]?.money || 0).toLocaleString('en-US')} ريال</span>
             {winner === t && <span className="final-crown">👑</span>}
             {stats && (
               <span className="final-stats">

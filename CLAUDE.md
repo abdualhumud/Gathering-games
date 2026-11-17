@@ -104,10 +104,17 @@ Every question object has this shape:
 - If `answer` isn't literally one of `options`, `options[0]` becomes the answer.
 - Old one-word categories (جغرافيا، دين، علوم…) are merged into the board categories.
 - Duplicate question texts are dropped; ids made unique.
+- `ﷺ` is spelled out (Tajawal has no glyph for the ligature).
 - Options are **shuffled whenever a question is drawn** (`withShuffledOptions`) — the
   source files list the correct answer first, so never show `options` unshuffled.
 
-**Bank size:** 5,001 verified questions in 41 categories (target range 4,000–6,000).
+**Bank size:** 4,938 verified questions in 41 categories (target range 4,000–6,000).
+
+**Difficulty (reviewed by hand, 3 levels):** 1 سهل / 2 متوسط / 3 صعب — currently
+1,066 / 2,208 / 1,664, and every category has ≥ 8 questions at each level.
+Bank files carry the digit on each line; the original `questions_*.js` files get theirs from
+`server/difficulty.js` (EASY / HARD sets, default 2, plus `REVIEW_EXCLUDED` ids dropped in the
+review). When adding questions, rate honestly: 1 = most people know it, 3 = specialist/trivia buff.
 
 **Adding questions (preferred):** add lines to a file in `server/bank/` (or a new
 `NN_name.txt` file — it is picked up automatically):
@@ -137,7 +144,11 @@ currently 41) on both client and server, so they can't drift apart.
 
 ### 1. اسبقهم (Asbiqhum) — Speed Buzzer Trivia
 
-**Theme:** Electric / Speed — deep navy `#060c18`, electric cyan `#00d4ff`
+**Theme:** Electric / Speed — deep navy `#050a16`, electric cyan `#00d4ff`.
+v2 "arcade race" look: skewed italic gradient logo with an SVG bolt (`AsbiqLogo`), speed-line
+background, round 3D arcade buzzers in each player's colour (`PLAYER_COLORS` → `--pc`),
+progress HUD (`AsbiqHud`), live score strip, verdict card, and a podium game-over screen.
+Online-room screens still use the older `.question-header` / `.buzzed-banner` classes.
 
 **Local mode:**
 - Add 2–8 players by name
@@ -201,20 +212,29 @@ currently 41) on both client and server, so they can't drift apart.
 
 **DO NOT** use olive/cream colors for MoneyBoard. That theme was tried and reverted.
 
+**Stage look (v2):** spotlight rays behind the stage, gold "marquee" logo (`.mb-marquee`,
+dotted-bulb outline), board wrapped in a gold gradient frame (`.mb-board-frame`), glossy bevelled
+cells with gold-gradient amounts, team score plates with a «الدور» tag, question card styled as
+the gold-framed screen with lettered options (أ ب ج د), super powers as round lifeline tokens.
+Setup: team plates with a «ضد» badge, category tiles, sticky start bar showing the 6 board slots.
+Amounts use Latin digits (`toLocaleString('en-US')`) — the Arabic zero renders as a dot.
+
 **Gameplay:**
-- 2 teams, 6 categories chosen from 41 available (or 🎲 random), 3 rows (200 / 400 / 600 ريال)
-- **Board size:** 18 questions (3 per category) or 36 (6 per category — two cells per
-  200/400/600 slot, like the classic سين جيم-style boards). `buildLocalBoard(cats, perCat)`.
+- 2 teams, 6 categories chosen from 41 available (or 🎲 random)
+- **Always 6 questions per category (36 total):** 2 × 200 (سهل), 2 × 400 (متوسط), 2 × 600 (صعب) —
+  higher amount = harder question. Cells are ordered `[200,400,600,200,400,600]` on both client
+  (`buildLocalBoard(cats)`) and server (`POINTS` in games/moneyboard.js); the board pairs
+  `rowIdx` with `rowIdx + 3` in one slot.
 - **Answer mode:** `choices` (4 options on screen, wrong → steal) or `host`
   (المقدّم يحكم: teams answer aloud, host taps «إظهار الإجابة» then picks
   الفريق الأول / الفريق الثاني / ولا أحد via `judge()`; turns alternate; double/الحفرة
   only apply if the picking team wins)
-- 18 distinct questions per board, row difficulty easy→hard; options shuffled; unseen preferred
+- 36 distinct questions per board, exact difficulty per row (falls back ±1 only if a category runs out); options shuffled; unseen preferred
 - Wrong option stays struck-through for the stealing team / second attempt;
   after resolution the correct answer is highlighted. Game over shows per-team stats.
 - Alternating turns; the active team picks a cell
 - 30s to answer; wrong → opponent gets 15s steal chance
-- All 18 cells filled → game over, highest money wins
+- All 36 cells filled → game over, highest money wins
 
 **Super powers (5 per team, matching asbghm.com):**
 
