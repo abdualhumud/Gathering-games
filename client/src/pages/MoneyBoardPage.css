@@ -805,3 +805,48 @@
 
 .final-row { flex-wrap: wrap; }
 .final-stats { width: 100%; font-size: 0.8rem; color: var(--muted); font-weight: 600; }
+
+/* ── Game options (board size / answer mode) ──────────────────────────── */
+.mb-options { display: flex; flex-direction: column; gap: 10px; width: 100%; }
+.mb-option-group { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.mb-option-label { font-size: 0.9rem; font-weight: 700; color: var(--muted); }
+.mb-seg { display: flex; background: var(--surface2); border: 1px solid var(--border); border-radius: 30px; padding: 3px; }
+.mb-seg button {
+  border: none; background: transparent; color: var(--muted); font-family: inherit;
+  font-weight: 800; font-size: 0.85rem; padding: 7px 14px; border-radius: 30px; cursor: pointer;
+}
+.mb-seg button.on { background: #f0c040; color: #1a1400; }
+.mb-option-hint { font-size: 0.8rem; color: var(--muted); text-align: right; margin: 0; }
+
+/* ── 36-question board: two cells per slot ────────────────────────────── */
+.mb-cell-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; }
+.mb-cell-pair .mb-cell { min-height: 70px; }
+.mb-cell-pair .cell-points { font-size: 1.6rem; }
+@media (max-width: 600px) {
+  .mb-cell-pair { grid-template-columns: 1fr; }
+  .mb-cell-pair .mb-cell { min-height: 46px; }
+  .mb-cell-pair .cell-points { font-size: 1.05rem; }
+  .mb-cell-pair .cell-riyal { display: none; }
+}
+
+/* ── Host-judged answers ──────────────────────────────────────────────── */
+.host-panel { width: 100%; max-width: 660px; display: flex; flex-direction: column; align-items: center; gap: 16px; }
+.host-reveal-btn { font-size: 1.1rem; padding: 14px 36px; }
+.host-answer {
+  width: 100%; text-align: center; padding: 18px; border-radius: var(--radius);
+  background: rgba(34,197,94,0.12); border: 2px solid var(--green);
+  display: flex; flex-direction: column; gap: 6px;
+}
+.host-answer-label { font-size: 0.8rem; color: var(--muted); font-weight: 700; }
+.host-answer strong { font-size: 1.5rem; color: var(--green); }
+.host-judge { width: 100%; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.host-judge-label { font-weight: 800; color: var(--text); }
+.host-judge-btns { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; width: 100%; }
+.judge-btn {
+  padding: 14px 10px; border-radius: var(--radius); font-family: inherit; font-weight: 800;
+  font-size: 0.95rem; cursor: pointer; background: var(--surface2); color: var(--text); border: 2px solid var(--border);
+}
+.judge-a { border-color: var(--blue); color: var(--blue); }
+.judge-b { border-color: var(--orange); color: var(--orange); }
+.judge-none { color: var(--muted); }
+.judge-btn:hover { filter: brightness(1.25); }

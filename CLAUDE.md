@@ -52,7 +52,7 @@ cd client && npm run preview  # serves on :4173 by default
 ├── server/
 │   ├── index.js                 # Express + Socket.IO server, room stores
 │   ├── questions.js             # Aggregator + normalisation pipeline (single source of truth)
-│   ├── bank/*.txt               # MAIN bank — compact one-line-per-question files (~2,700 q)
+│   ├── bank/*.txt               # MAIN bank — compact one-line-per-question files (~3,500 q)
 │   ├── bank/loader.js           # Parses bank/*.txt
 │   ├── questions_*.js           # Original category files (reviewed; bad ids in EXCLUDED_IDS)
 │   ├── questions_huroof_letters.js # Extra questions for rare Huroof letters (ض ظ ذ ز)
@@ -107,7 +107,7 @@ Every question object has this shape:
 - Options are **shuffled whenever a question is drawn** (`withShuffledOptions`) — the
   source files list the correct answer first, so never show `options` unshuffled.
 
-**Bank size:** ~4,180 verified questions in 39 categories (target range 4,000–6,000).
+**Bank size:** 5,001 verified questions in 41 categories (target range 4,000–6,000).
 
 **Adding questions (preferred):** add lines to a file in `server/bank/` (or a new
 `NN_name.txt` file — it is picked up automatically):
@@ -129,7 +129,7 @@ The client remembers recently seen question ids in `localStorage` (`gg-seen-ques
 and `pickFresh()` prefers unseen questions, so consecutive games don't repeat.
 
 MoneyBoard categories are **derived from the bank** (every category with ≥ 6 questions —
-currently 39) on both client and server, so they can't drift apart.
+currently 41) on both client and server, so they can't drift apart.
 
 ---
 
@@ -202,7 +202,13 @@ currently 39) on both client and server, so they can't drift apart.
 **DO NOT** use olive/cream colors for MoneyBoard. That theme was tried and reverted.
 
 **Gameplay:**
-- 2 teams, 6 categories chosen from 39 available (or 🎲 random), 3 rows (200 / 400 / 600 ريال)
+- 2 teams, 6 categories chosen from 41 available (or 🎲 random), 3 rows (200 / 400 / 600 ريال)
+- **Board size:** 18 questions (3 per category) or 36 (6 per category — two cells per
+  200/400/600 slot, like the classic سين جيم-style boards). `buildLocalBoard(cats, perCat)`.
+- **Answer mode:** `choices` (4 options on screen, wrong → steal) or `host`
+  (المقدّم يحكم: teams answer aloud, host taps «إظهار الإجابة» then picks
+  الفريق الأول / الفريق الثاني / ولا أحد via `judge()`; turns alternate; double/الحفرة
+  only apply if the picking team wins)
 - 18 distinct questions per board, row difficulty easy→hard; options shuffled; unseen preferred
 - Wrong option stays struck-through for the stealing team / second attempt;
   after resolution the correct answer is highlighted. Game over shows per-team stats.

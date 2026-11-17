@@ -39,14 +39,15 @@ const freshStats = () => ({ A: { correct: 0, steals: 0 }, B: { correct: 0, steal
  * this device hasn't seen recently, with options shuffled (the correct answer
  * is no longer always the first option).
  */
-function buildLocalBoard(selectedCats) {
+function buildLocalBoard(selectedCats, perCat = 3) {
+  const points = perCat === 6 ? [...POINTS, ...POINTS] : POINTS;
   const used = new Set();
   const board = selectedCats.map(cat => {
     const pool = allQuestions.filter(q => q.category === cat);
-    const cells = POINTS.map((pts, i) => {
+    const cells = points.map((pts, i) => {
       // row i → difficulty i+1 (200 سهل، 400 متوسط، 600 صعب), falling back to
       // nearby levels, then the whole category, then the whole bank.
-      const wanted = i + 1;
+      const wanted = (i % 3) + 1;
       const tiers = [
         pool.filter(q => q.difficulty === wanted),
         pool.filter(q => Math.abs(q.difficulty - wanted) === 1),
@@ -100,7 +101,11 @@ function useLocalGame() {
   const [isTwoAnswers,   setIsTwoAnswers]    = useState(false); // إجابتين active
   const [isHafra,        setIsHafra]         = useState(false); // الحفرة active
 
-  const totalCells = 18;
+  const [boardSize, setBoardSize]   = useState(3);         // questions per category: 3 (18) or 6 (36)
+  const [answerMode, setAnswerMode] = useState('choices'); // 'choices' | 'host'
+  const [revealed, setRevealed]     = useState(false);     // host mode: answer shown
+
+  const totalCells = board ? board.reduce((n, col) => n + col.cells.length, 0) : selected.length * boardSize;
 
   const randomCategories = () => setSelected(shuffle(VALID_CATEGORIES).slice(0, 6));
   const clearCategories  = () => setSelected([]);
@@ -114,7 +119,7 @@ function useLocalGame() {
   };
 
   const startGame = () => {
-    const b = buildLocalBoard(selected);
+    const b = buildLocalBoard(selected, boardSize);
     setBoard(b);
     setTeams({ A: { money: 0 }, B: { money: 0 } });
     setTurn('A');
@@ -184,6 +189,7 @@ function useLocalGame() {
     setOrigTeam(currentTurn);
     setSelAns(null);
     setWrongOpts([]);
+    setRevealed(false);
     setAttempt(a => a + 1);
     setPhase('answer');
     setTimer(true);
@@ -208,10 +214,11 @@ function useLocalGame() {
   const timeUp = useCallback(() => {
     if (phase !== 'answer' && phase !== 'steal') return;
     setTimer(false);
+    if (answerMode === 'host') return; // the host still decides who answered
     const { colIdx, rowIdx } = activeCell;
     const cell = board[colIdx].cells[rowIdx];
     _resolveAnswer(false, cell);
-  }, [phase, activeCell, board]); // eslint-disable-line
+  }, [phase, activeCell, board, answerMode]); // eslint-disable-line
 
   function _resolveAnswer(isCorrect, cell, answerIdx = null) {
     clearTimeout(timeoutRef.current);
@@ -305,6 +312,48 @@ function useLocalGame() {
     }
   }
 
+  // ── Host mode: the host reveals the answer and says who got it ──────────
+  const revealAnswer = () => { setTimer(false); setRevealed(true); };
+
+  const judge = (winner) => {           // winner: 'A' | 'B' | null
+    if (phase !== 'answer' || !activeCell) return;
+    clearTimeout(timeoutRef.current);
+    setTimer(false);
+    setRevealed(true);
+    const cell = board[activeCell.colIdx].cells[activeCell.rowIdx];
+    const picker = originalTeam;
+    const powersApply = winner && winner === picker;
+    const earned = winner ? (powersApply && isDoubled ? cell.points * 2 : cell.points) : 0;
+    const oppDeduct = powersApply && isHafra ? cell.points : 0;
+    const newTeams = {
+      A: { money: Math.max(0, teams.A.money + (winner === 'A' ? earned : 0) - (winner === 'B' ? oppDeduct : 0)) },
+      B: { money: Math.max(0, teams.B.money + (winner === 'B' ? earned : 0) - (winner === 'A' ? oppDeduct : 0)) },
+    };
+    const newBoard = board.map((col, ci) => ({
+      ...col,
+      cells: col.cells.map((c, ri) =>
+        ci === activeCell.colIdx && ri === activeCell.rowIdx ? { ...c, answered: true, winner } : c),
+    }));
+    const newCount = answeredCount + 1;
+    setTeams(newTeams);
+    setBoard(newBoard);
+    setCount(newCount);
+    if (winner) {
+      setStats(prev => ({
+        ...prev,
+        [winner]: { correct: prev[winner].correct + 1, steals: prev[winner].steals + (winner !== picker ? 1 : 0) },
+      }));
+    }
+    setResultInfo({ isCorrect: !!winner, winner, points: earned, hafra: oppDeduct > 0, hafraPoints: oppDeduct, correctAnswer: cell.question?.answer, teams: newTeams });
+    setPhase('result');
+    setTurn(picker === 'A' ? 'B' : 'A');  // turns alternate in host mode
+    setIsDoubled(false); setIsTwoAnswers(false); setIsHafra(false); setFriendTimer(false);
+    timeoutRef.current = setTimeout(() => {
+      if (newCount >= totalCells) { setScreen('gameover'); return; }
+      setScreen('game'); setPhase('pick'); setActiveCell(null); setResultInfo(null); setRevealed(false);
+    }, 2000);
+  };
+
   // Cleanup on unmount
   useEffect(() => () => clearTimeout(timeoutRef.current), []);
 
@@ -336,6 +385,7 @@ function useLocalGame() {
     screen, teamAName, setTeamAName, teamBName, setTeamBName,
     selected, toggleCategory, startGame, randomCategories, clearCategories,
     wrongOpts, attempt, stats,
+    boardSize, setBoardSize, answerMode, setAnswerMode, revealed, revealAnswer, judge, originalTeam,
     board, teams, currentTurn, activeTeam, phase,
     activeCell, pickCell, currentQuestion, currentPoints,
     submitAnswer, timeUp, timerRunning, selectedAnswer,
@@ -444,6 +494,28 @@ export default function MoneyBoardPage() {
               <label>{TEAM_NAMES.B}</label>
               <input className="input-field" value={local.teamBName} onChange={e => local.setTeamBName(e.target.value)} maxLength={20} />
             </div>
+          </div>
+
+          <div className="mb-options">
+            <div className="mb-option-group">
+              <span className="mb-option-label">حجم اللوحة</span>
+              <div className="mb-seg">
+                <button className={local.boardSize === 3 ? 'on' : ''} onClick={() => local.setBoardSize(3)}>18 سؤال</button>
+                <button className={local.boardSize === 6 ? 'on' : ''} onClick={() => local.setBoardSize(6)}>36 سؤال</button>
+              </div>
+            </div>
+            <div className="mb-option-group">
+              <span className="mb-option-label">طريقة الإجابة</span>
+              <div className="mb-seg">
+                <button className={local.answerMode === 'choices' ? 'on' : ''} onClick={() => local.setAnswerMode('choices')}>اختيارات</button>
+                <button className={local.answerMode === 'host' ? 'on' : ''} onClick={() => local.setAnswerMode('host')}>المقدّم يحكم</button>
+              </div>
+            </div>
+            <p className="mb-option-hint">
+              {local.answerMode === 'host'
+                ? 'الفريق يجاوب بصوته، والمقدّم يظهر الإجابة ويحدد من جاوب صح.'
+                : 'أربعة اختيارات على الشاشة؛ الخطأ يعطي الفريق الآخر فرصة سرقة.'}
+            </p>
           </div>
 
           <div className="cat-select-section">
@@ -588,6 +660,30 @@ export default function MoneyBoardPage() {
             <p className="question-text">{local.currentQuestion?.text}</p>
           </div>
 
+          {local.answerMode === 'host' ? (
+            <div className="host-panel">
+              {!local.revealed ? (
+                <button className="btn-gold host-reveal-btn" onClick={local.revealAnswer}>👁 إظهار الإجابة</button>
+              ) : (
+                <>
+                  <div className="host-answer pop-in">
+                    <span className="host-answer-label">الإجابة</span>
+                    <strong>{local.currentQuestion?.answer}</strong>
+                  </div>
+                  {local.phase === 'answer' && (
+                    <div className="host-judge">
+                      <span className="host-judge-label">مين جاوب صح؟</span>
+                      <div className="host-judge-btns">
+                        <button className="judge-btn judge-a" onClick={() => local.judge('A')}>{local.teamAName}</button>
+                        <button className="judge-btn judge-b" onClick={() => local.judge('B')}>{local.teamBName}</button>
+                        <button className="judge-btn judge-none" onClick={() => local.judge(null)}>ولا أحد</button>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          ) : (
           <div className="options-grid">
             {opts.map((opt, i) => {
               const revealed = local.phase === 'result';
@@ -607,6 +703,7 @@ export default function MoneyBoardPage() {
               );
             })}
           </div>
+          )}
 
           {local.resultInfo && (
             <ResultFlash info={local.resultInfo} teamNames={{ A: local.teamAName, B: local.teamBName }} />
@@ -866,31 +963,37 @@ function BoardGrid({ board, activeCell, onPickCell, canPick, currentTurn }) {
           <div key={ci} className="mb-header-cell">{col.category}</div>
         ))}
       </div>
-      {/* 3 rows: 200 / 400 / 600 */}
+      {/* 3 rows: 200 / 400 / 600 — with 6 questions per category each slot holds two cells */}
       {[0, 1, 2].map(rowIdx => (
         <div key={rowIdx} className="mb-board-row">
           {board.map((col, colIdx) => {
-            const cell = col.cells[rowIdx];
-            const isActive = activeCell?.colIdx === colIdx && activeCell?.rowIdx === rowIdx;
-            return (
-              <button
-                key={colIdx}
-                className={`mb-cell ${cell.answered ? `answered winner-${cell.winner || 'none'}` : ''} ${isActive ? 'active-cell' : ''} ${canPick && !cell.answered ? 'pickable' : ''}`}
-                onClick={() => !cell.answered && canPick && onPickCell(colIdx, rowIdx)}
-                disabled={cell.answered || !canPick}
-              >
-                {cell.answered ? (
-                  <span className="cell-winner-icon">
-                    {cell.winner === 'A' ? '🔵' : cell.winner === 'B' ? '🟠' : '✖'}
-                  </span>
-                ) : (
-                  <>
-                    <span className="cell-points">{cell.points}</span>
-                    <span className="cell-riyal">ريال</span>
-                  </>
-                )}
-              </button>
-            );
+            const idxs = col.cells.length === 6 ? [rowIdx, rowIdx + 3] : [rowIdx];
+            const buttons = idxs.map(ri => {
+              const cell = col.cells[ri];
+              const isActive = activeCell?.colIdx === colIdx && activeCell?.rowIdx === ri;
+              return (
+                <button
+                  key={ri}
+                  className={`mb-cell ${cell.answered ? `answered winner-${cell.winner || 'none'}` : ''} ${isActive ? 'active-cell' : ''} ${canPick && !cell.answered ? 'pickable' : ''}`}
+                  onClick={() => !cell.answered && canPick && onPickCell(colIdx, ri)}
+                  disabled={cell.answered || !canPick}
+                >
+                  {cell.answered ? (
+                    <span className="cell-winner-icon">
+                      {cell.winner === 'A' ? '🔵' : cell.winner === 'B' ? '🟠' : '✖'}
+                    </span>
+                  ) : (
+                    <>
+                      <span className="cell-points">{cell.points}</span>
+                      <span className="cell-riyal">ريال</span>
+                    </>
+                  )}
+                </button>
+              );
+            });
+            return idxs.length === 2
+              ? <div key={colIdx} className="mb-cell-pair">{buttons}</div>
+              : buttons[0];
           })}
         </div>
       ))}
