@@ -160,8 +160,10 @@ export function applyThemeCSS(theme) {
   set('--huroof-team-b-dim',    theme.teamB?.dim);
   set('--huroof-team-b-border', theme.teamB?.border);
   set('--huroof-team-b-glow',   theme.teamB?.glow);
-  set('--huroof-accent',        theme.accent);
-  set('--huroof-accent-dim',    theme.accentDim);
-  set('--huroof-bg',            theme.bg);
-  set('--huroof-surface',       theme.surface);
+  // Light UI: the accent must read on white, so it follows team A's colour;
+  // backgrounds are the platform's light surfaces (theme.bg/surface are legacy).
+  set('--huroof-accent',        theme.teamA?.main || theme.accent);
+  set('--huroof-accent-dim',    theme.teamA?.dim || theme.accentDim);
+  set('--huroof-bg',            '#f6f4f0');
+  set('--huroof-surface',       '#ffffff');
 }

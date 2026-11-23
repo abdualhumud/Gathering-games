@@ -13,7 +13,7 @@ const WRONG_PENALTY = -20;
 const QUESTIONS_PER_GAME = 10;
 const MAX_PLAYERS = 8;
 export const OPT_KEYS = ['أ', 'ب', 'ج', 'د'];
-const PLAYER_COLORS = ['#00d4ff', '#f97316', '#22c55e', '#a855f7', '#ef4444', '#fbbf24', '#ec4899', '#84cc16'];
+const PLAYER_COLORS = ['#2f62e8', '#ea6a12', '#16a34a', '#9333ea', '#dc2626', '#b7791f', '#db2777', '#0e7490'];
 export const pcStyle = i => ({ '--pc': PLAYER_COLORS[(i ?? 0) % PLAYER_COLORS.length] });
 
 // ─── Local game logic ────────────────────────────────────────────────────────
@@ -144,28 +144,52 @@ export default function AsbiqhumPage() {
   // ── Mode selection ──────────────────────────────────────────────────────────
   if (!mode) {
     return (
-      <div className="page asbiq-setup">
-        <button className="back-btn" onClick={() => navigate('/')}>← العودة</button>
-        <div className="asbiq-panel pop-in">
-          <AsbiqLogo />
-          <p className="asbiq-tagline">سؤال على الشاشة، وأسرع إصبع يضغط الجرس يجاوب.</p>
-          <div className="asbiq-mode-tiles">
-            <button className="asbiq-mode-tile primary" onClick={() => setMode('local')}>
-              <span className="asbiq-mode-title">لعب محلي</span>
-              <span className="asbiq-mode-sub">جهاز واحد، كل لاعب له زر</span>
-            </button>
-            <button className="asbiq-mode-tile" onClick={() => setMode('room')}>
-              <span className="asbiq-mode-title">غرفة أونلاين</span>
-              <span className="asbiq-mode-sub">كل لاعب يضغط من جواله — يتطلب خادماً</span>
-            </button>
-          </div>
-          <div className="asbiq-rules">
-            <span><b>{QUESTIONS_PER_GAME}</b> أسئلة</span>
-            <span><b>{QUESTION_TIME}</b> ثانية لكل سؤال</span>
-            <span>الأسرع يأخذ حتى <b>{BASE_POINTS}</b></span>
-            <span>الخطأ <b>{WRONG_PENALTY}</b></span>
-          </div>
-        </div>
+      <div className="asb asb-landing">
+        <AsbiqTopBar onBack={() => navigate('/')} backLabel="الرئيسية" />
+        <main className="asb-landing-grid">
+          <section className="asb-intro pop-in">
+            <span className="asb-kicker">لعبة سرعة وثقافة عامة</span>
+            <h1 className="asb-display">اسبقهم</h1>
+            <p className="asb-lead">
+              يظهر السؤال للجميع، وأول من يضغط الجرس يجاوب. الإجابة الصحيحة تعطيك نقاطاً أكثر كل ما كنت أسرع، والخطأ يخصم منك.
+            </p>
+            <div className="asb-modes">
+              <button className="asb-mode primary" onClick={() => setMode('local')}>
+                <span className="asb-mode-title">لعب على جهاز واحد</span>
+                <span className="asb-mode-sub">من ٢ إلى ٨ لاعبين، لكل لاعب زر على الشاشة</span>
+                <span className="asb-mode-go">ابدأ ←</span>
+              </button>
+              <button className="asb-mode" onClick={() => setMode('room')}>
+                <span className="asb-mode-title">غرفة أونلاين</span>
+                <span className="asb-mode-sub">كل لاعب يضغط الجرس من جواله</span>
+                <span className="asb-mode-go">أنشئ أو انضم ←</span>
+              </button>
+            </div>
+            <dl className="asb-facts">
+              <div><dt>{QUESTIONS_PER_GAME}</dt><dd>أسئلة في الجولة</dd></div>
+              <div><dt>{QUESTION_TIME}</dt><dd>ثانية لكل سؤال</dd></div>
+              <div><dt>{BASE_POINTS}</dt><dd>نقطة للأسرع</dd></div>
+              <div><dt>{Math.abs(WRONG_PENALTY)}</dt><dd>نقطة خصم للخطأ</dd></div>
+            </dl>
+          </section>
+
+          <aside className="asb-howto pop-in">
+            <h2>كيف تلعب</h2>
+            <ol className="asb-steps">
+              <li><b>اقرأ السؤال</b><span>يظهر للجميع مع ٢٠ ثانية.</span></li>
+              <li><b>اضغط زرك أولاً</b><span>أول من يضغط يحجز الإجابة.</span></li>
+              <li><b>اختر الجواب</b><span>صح = نقاط حسب سرعتك، خطأ = −٢٠.</span></li>
+            </ol>
+            <div className="asb-preview" aria-hidden="true">
+              <div className="asb-preview-q">ما عاصمة اليابان؟</div>
+              <div className="asb-preview-btns">
+                <span style={pcStyle(0)}>سارة</span>
+                <span style={pcStyle(1)}>خالد</span>
+                <span style={pcStyle(2)}>نورة</span>
+              </div>
+            </div>
+          </aside>
+        </main>
       </div>
     );
   }
@@ -174,43 +198,53 @@ export default function AsbiqhumPage() {
   if (mode === 'local') {
     if (local.screen === 'setup') {
       const full = local.players.length >= MAX_PLAYERS;
+      const n = local.players.length;
       return (
-        <div className="page asbiq-setup">
-          <button className="back-btn" onClick={() => setMode(null)}>← العودة</button>
-          <div className="asbiq-panel pop-in">
-            <AsbiqLogo small />
-            <div className="asbiq-section-head">
-              <h3>اللاعبون</h3>
-              <span className="asbiq-count">{local.players.length}/{MAX_PLAYERS}</span>
-            </div>
-            <div className="asbiq-add-row">
-              <input
-                className="input-field"
-                placeholder={full ? 'اكتمل العدد' : 'اسم اللاعب'}
-                value={local.nameInput}
-                onChange={e => local.setNameInput(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && !full && local.addPlayer()}
-                maxLength={20}
-                disabled={full}
-              />
-              <button className="asbiq-add-btn" onClick={local.addPlayer} disabled={full}>إضافة</button>
-            </div>
+        <div className="asb">
+          <AsbiqTopBar onBack={() => setMode(null)} />
+          <main className="asb-setup-grid">
+            <section className="asb-card pop-in">
+              <div className="asb-card-head">
+                <h2>من يلعب؟</h2>
+                <span className="asb-count">{n} / {MAX_PLAYERS}</span>
+              </div>
+              <form className="asb-add-row" onSubmit={e => { e.preventDefault(); if (!full) local.addPlayer(); }}>
+                <input
+                  className="input-field"
+                  placeholder={full ? 'اكتمل العدد' : 'اكتب اسم اللاعب'}
+                  value={local.nameInput}
+                  onChange={e => local.setNameInput(e.target.value)}
+                  maxLength={20}
+                  disabled={full}
+                  autoFocus
+                />
+                <button type="submit" className="asb-btn" disabled={full || !local.nameInput.trim()}>إضافة</button>
+              </form>
+              <div className="asb-roster">
+                {n === 0 && <p className="asb-empty">لا يوجد لاعبون بعد — أضف لاعبَين على الأقل.</p>}
+                {local.players.map((p, i) => (
+                  <div key={p.name} className="asb-player pop-in" style={pcStyle(i)}>
+                    <span className="asb-avatar">{p.name.slice(0, 1)}</span>
+                    <span className="asb-player-name">{p.name}</span>
+                    <button className="asb-x" onClick={() => local.removePlayer(p.name)} aria-label={`حذف ${p.name}`}>✕</button>
+                  </div>
+                ))}
+              </div>
+            </section>
 
-            <div className="asbiq-roster">
-              {local.players.length === 0 && <p className="asbiq-empty">أضف لاعبَين على الأقل (حتى {MAX_PLAYERS})</p>}
-              {local.players.map((p, i) => (
-                <div key={p.name} className="asbiq-chip pop-in" style={pcStyle(i)}>
-                  <span className="asbiq-avatar">{p.name.slice(0, 1)}</span>
-                  <span className="asbiq-chip-name">{p.name}</span>
-                  <button className="asbiq-chip-x" onClick={() => local.removePlayer(p.name)} aria-label={`حذف ${p.name}`}>✕</button>
-                </div>
-              ))}
-            </div>
-
-            <button className="asbiq-go" onClick={local.startGame} disabled={local.players.length < 2}>
-              {local.players.length < 2 ? 'أضف لاعبَين على الأقل' : 'ابدأ السباق'}
-            </button>
-          </div>
+            <aside className="asb-card asb-summary pop-in">
+              <h2>الجولة</h2>
+              <ul className="asb-summary-list">
+                <li><span>عدد الأسئلة</span><b>{QUESTIONS_PER_GAME}</b></li>
+                <li><span>وقت كل سؤال</span><b>{QUESTION_TIME} ثانية</b></li>
+                <li><span>الإجابة الصحيحة</span><b>حتى {BASE_POINTS} نقطة</b></li>
+                <li><span>الإجابة الخاطئة</span><b>خصم {Math.abs(WRONG_PENALTY)} نقطة</b></li>
+              </ul>
+              <button className="asb-btn big" onClick={local.startGame} disabled={n < 2}>
+                {n < 2 ? `أضف ${2 - n === 2 ? 'لاعبَين' : 'لاعباً آخر'}` : `ابدأ (${n} لاعبين)`}
+              </button>
+            </aside>
+          </main>
         </div>
       );
     }
@@ -219,7 +253,7 @@ export default function AsbiqhumPage() {
       const q = local.currentQuestion;
       const buzzer = local.buzzedIdx;
       return (
-        <div className="page asbiq-question">
+        <div className="asb asb-play">
           <AsbiqHud index={local.qIndex} total={QUESTIONS_PER_GAME} category={q?.category}>
             <Timer duration={QUESTION_TIME} running={local.timerRunning} onEnd={local.timeUp} />
           </AsbiqHud>
@@ -272,7 +306,7 @@ export default function AsbiqhumPage() {
       const kind = timeUp ? 'timeout' : correct ? 'correct' : 'wrong';
       const who = local.players[local.buzzedIdx]?.name;
       return (
-        <div className="page asbiq-result">
+        <div className="asb asb-play asb-result">
           <AsbiqVerdict
             kind={kind}
             title={timeUp ? 'انتهى الوقت' : correct ? `صح يا ${who}!` : `خطأ يا ${who}`}
@@ -290,7 +324,7 @@ export default function AsbiqhumPage() {
     if (local.screen === 'gameover') {
       const ranked = local.players.map((p, i) => ({ ...p, color: i }));
       return (
-        <div className="page asbiq-gameover">
+        <div className="asb asb-play asb-over">
           <AsbiqPodium players={ranked} />
           <div className="asbiq-actions">
             <button className="asbiq-ghost" onClick={local.reset}>لعبة جديدة</button>
@@ -309,14 +343,21 @@ export default function AsbiqhumPage() {
 export function AsbiqLogo({ small }) {
   return (
     <div className={`asbiq-logo ${small ? 'small' : ''}`}>
-      <svg className="asbiq-bolt" viewBox="0 0 24 32" aria-hidden="true">
-        <path d="M14 0 2 18h8l-2 14L22 12h-8l2-12z" />
-      </svg>
-      <div>
-        <span className="asbiq-kicker">أسرع إصبع يكسب</span>
-        <h1 className="asbiq-title">اسبقهم</h1>
-      </div>
+      <span className="asbiq-logo-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 32"><path d="M14 0 2 18h8l-2 14L22 12h-8l2-12z" /></svg>
+      </span>
+      <span className="asbiq-title">اسبقهم</span>
     </div>
+  );
+}
+
+export function AsbiqTopBar({ onBack, backLabel = 'رجوع', children }) {
+  return (
+    <header className="asb-top">
+      <button className="asb-back" onClick={onBack}>→ {backLabel}</button>
+      <AsbiqLogo small />
+      <div className="asb-top-end">{children}</div>
+    </header>
   );
 }
 
@@ -386,7 +427,7 @@ export function AsbiqPodium({ players }) {
   return (
     <div className="asbiq-finale pop-in">
       <span className="asbiq-kicker">النتيجة النهائية</span>
-      <h1 className="asbiq-title">{tie ? 'تعادل على الصدارة!' : `${sorted[0]?.name} سبقهم!`}</h1>
+      <h1 className="asbiq-finale-title">{tie ? 'تعادل على الصدارة!' : `${sorted[0]?.name} سبقهم!`}</h1>
       <div className="asbiq-podium">
         {top.map((p, k) => p && (
           <div key={p.name} className={`asbiq-step step-${[2, 1, 3][k]}`} style={pcStyle(p.color)}>

@@ -1,47 +1,13 @@
-.scoreboard {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  width: 100%;
-}
-
+.scoreboard { display: flex; flex-direction: column; gap: 6px; width: 100%; }
 .score-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+  display: flex; align-items: center; gap: 12px;
   padding: 10px 14px;
-  background: var(--surface2);
-  border-radius: 10px;
+  background: var(--surface);
   border: 1px solid var(--border);
-  transition: all 0.3s;
+  border-radius: 12px;
 }
-
-.score-row.highlight {
-  border-color: var(--gold);
-  background: rgba(251,191,36,0.08);
-  box-shadow: 0 0 12px rgba(251,191,36,0.2);
-}
-
-.score-rank {
-  font-size: 1.2rem;
-  min-width: 32px;
-  text-align: center;
-}
-
-.score-name {
-  flex: 1;
-  font-weight: 600;
-}
-
-.score-pts {
-  font-size: 1.1rem;
-  font-weight: 800;
-  color: var(--gold);
-}
-
-.score-pts small {
-  font-size: 0.75rem;
-  font-weight: 400;
-  color: var(--muted);
-  margin-right: 2px;
-}
+.score-row.highlight { border-color: var(--accent); background: var(--accent-dim); }
+.score-rank { font-size: 1.1rem; min-width: 30px; text-align: center; }
+.score-name { flex: 1; font-weight: 700; }
+.score-pts { font-size: 1.05rem; font-weight: 900; color: var(--text); font-variant-numeric: tabular-nums; }
+.score-pts small { font-size: 0.75rem; font-weight: 500; color: var(--muted); margin-right: 2px; }

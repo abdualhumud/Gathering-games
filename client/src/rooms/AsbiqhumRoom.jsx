@@ -31,7 +31,7 @@ export default function AsbiqhumRoom({ onExit }) {
 
   if (!s) {
     return (
-      <div className="page asbiq-setup rk-theme-asbiq">
+      <div className="asb asb-center rk-theme-asbiq">
         <RoomEntry room={room} logo={<AsbiqLogo small />} onExit={onExit} />
       </div>
     );
@@ -43,7 +43,7 @@ export default function AsbiqhumRoom({ onExit }) {
 
   if (s.phase === 'lobby') {
     return (
-      <div className="page asbiq-setup rk-theme-asbiq">
+      <div className="asb asb-center rk-theme-asbiq">
         <ConnectionBanner room={room} />
         <div className="asbiq-panel rk-lobby">
           <AsbiqLogo small />
@@ -73,7 +73,7 @@ export default function AsbiqhumRoom({ onExit }) {
 
   if (s.phase === 'over') {
     return (
-      <div className="page asbiq-gameover rk-theme-asbiq">
+      <div className="asb asb-play asb-over rk-theme-asbiq">
         <ConnectionBanner room={room} />
         <AsbiqPodium players={players} />
         <div className="asbiq-actions">
@@ -96,7 +96,7 @@ export default function AsbiqhumRoom({ onExit }) {
   const who = r && byId[r.playerId]?.name;
 
   return (
-    <div className="page asbiq-question rk-theme-asbiq">
+    <div className="asb asb-play rk-theme-asbiq">
       <ConnectionBanner room={room} />
       <RoomError room={room} />
       <AsbiqHud index={s.qIndex} total={s.total} category={q?.category}>

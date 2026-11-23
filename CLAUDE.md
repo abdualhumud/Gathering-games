@@ -152,11 +152,13 @@ currently 41) on both client and server, so they can't drift apart.
 
 ### 1. اسبقهم (Asbiqhum) — Speed Buzzer Trivia
 
-**Theme:** Electric / Speed — deep navy `#050a16`, electric cyan `#00d4ff`.
-v2 "arcade race" look: skewed italic gradient logo with an SVG bolt (`AsbiqLogo`), speed-line
-background, round 3D arcade buzzers in each player's colour (`PLAYER_COLORS` → `--pc`),
-progress HUD (`AsbiqHud`), live score strip, verdict card, and a podium game-over screen.
-Online-room screens still use the older `.question-header` / `.buzzed-banner` classes.
+**Theme:** light (see «Design direction»), accent blue `#2f62e8`, wrapper class `.asb`.
+Landing = two columns (intro + mode cards + facts | «كيف تلعب» steps with a mini preview);
+setup = players card + round summary; play = HUD (progress + timer), big white question card,
+rounded rectangular buzzers filled with each player's colour (`PLAYER_COLORS` → `--pc`),
+lettered options, score strip; result verdict card + ranking bars; podium finale.
+Shared pieces exported for the room screen: `AsbiqLogo`, `AsbiqTopBar`, `AsbiqHud`, `AsbiqStrip`,
+`AsbiqVerdict`, `AsbiqRanking`, `AsbiqPodium`, `pcStyle`, `OPT_KEYS`.
 
 **Local mode:**
 - Add 2–8 players by name
@@ -169,10 +171,7 @@ Online-room screens still use the older `.question-header` / `.buzzed-banner` cl
 - Each player presses a single "🔔 اسبقهم!" buzzer button on their own device
 - Server tracks who buzzed first; only that player sees the answer options
 
-**CSS design decisions:**
-- Scoped CSS vars on `.asbiq-*` selectors — avoids polluting global scope
-- Per-player buzz buttons use `nth-child(1..8)` with `--pc` and `--pc-dim` vars for 8 distinct player colors
-- `iconPulse` animation on setup icon; `trophyFloat` on gameover trophy
+**CSS:** vars scoped on `.asb` (`--accent`, `--accent-soft`); player colour via inline `--pc`.
 
 ---
 
@@ -205,11 +204,10 @@ Online-room screens still use the older `.question-header` / `.buzzed-banner` cl
 
 ### 3. لوحة المال (MoneyBoard) — Jeopardy Board
 
-**Reference design:** asbghm.com — classic TV Jeopardy look
+**Reference design:** asbghm.com — the board is the classic blue TV board; the pages around it are light.
 
 **Visual spec (board):**
-- `background: #010814` — very dark navy for game/question pages
-- Board wrapper: `background: #000`, `padding: 4px`, black gaps between cells
+- Pages: light `var(--bg)`; the board sits in a navy frame `#1b2072` (inner `#0c0f3a` gaps)
 - Category header cells: `background: #2e2ea8` — visible blue-purple, white bold text
 - Money cells: `background: #2e2ea8`, hover `#4040cc`, active gold outline
 - Money amount: `font-size: 2.4rem`, `color: #f0c040`, large and dominant
@@ -220,12 +218,10 @@ Online-room screens still use the older `.question-header` / `.buzzed-banner` cl
 
 **DO NOT** use olive/cream colors for MoneyBoard. That theme was tried and reverted.
 
-**Stage look (v2):** spotlight rays behind the stage, gold "marquee" logo (`.mb-marquee`,
-dotted-bulb outline), board wrapped in a gold gradient frame (`.mb-board-frame`), glossy bevelled
-cells with gold-gradient amounts, team score plates with a «الدور» tag, question card styled as
-the gold-framed screen with lettered options (أ ب ج د), super powers as round lifeline tokens.
-Setup: team plates with a «ضد» badge, category tiles, sticky start bar showing the 6 board slots.
-Amounts use Latin digits (`toLocaleString('en-US')`) — the Arabic zero renders as a dot.
+**Look (v3, light):** wordmark «لوحة المال» with gold accent `#b7791f`, white setup card with team
+inputs + «ضد», category tiles, sticky start bar with the 6 board slots; white score plates with a
+team-coloured top border and «الدور» tag; white question card with a navy category pill; lettered
+options; super powers as soft round tokens. Amounts use Latin digits (`toLocaleString('en-US')`).
 
 **Gameplay:**
 - 2 teams, 6 categories chosen from 41 available (or 🎲 random)
@@ -264,15 +260,26 @@ Amounts use Latin digits (`toLocaleString('en-US')`) — the Arabic zero renders
 
 ## CSS Architecture
 
+### Design direction (chosen by the owner): **light, simple, elegant**
+Dark neon/glow styles were rejected twice ("looks like a template"). Keep: warm paper background,
+white cards with soft shadows, ink text, ONE accent per game, colour only where it carries meaning
+(players/teams, correct/wrong), no emoji as decoration where a small drawing or text works,
+Tajawal 800–900 for headings. Accents: اسبقهم `#2f62e8`, حروف `#16a34a` (follows Huroof team A),
+لوحة المال `#b7791f` + the navy/gold board.
+
 ### Global tokens (`client/src/index.css`)
 ```css
 :root {
-  --bg: #0d0d1a;       --surface: #181830;   --surface2: #12122a;
-  --accent: #e94560;   --green: #22c55e;     --orange: #f97316;
-  --blue: #5b9aff;     --gold: #fbbf24;      --text: #f0f0f5;
-  --muted: #8a8aab;    --radius: 14px;       --radius-sm: 8px;
+  --bg: #f6f4f0;  --surface: #fff;  --surface2: #f3f1ec;  --surface3: #ebe8e2;
+  --text/--ink: #18181b;  --muted: #6f6b74;  --faint: #a3a0a8;
+  --border: #e6e2da;  --border-strong: #d6d1c7;
+  --accent / --accent-ink / --accent-dim  (overridden per game wrapper)
+  --green #16a34a  --red #dc2626  --orange #ea6a12  --blue #2f62e8  --gold #c58a12
+  --shadow-sm / --shadow / --shadow-lg;  --radius 16px  --radius-sm 10px  --radius-lg 24px
 }
 ```
+Huroof themes only pick team colours now; `applyThemeCSS` forces light backgrounds and uses
+team A's colour as the accent (so it is readable on white). Owned hexes are filled solid.
 
 ### Scoping pattern (important)
 Each game's CSS scopes its custom variables to its own page classes to avoid conflicts:
@@ -349,7 +356,7 @@ request takes ~1 min); rooms are in memory and reset on restart/deploy.
 
 1. **MoneyBoard board color** — The correct cell color is `#2e2ea8` (visible blue-purple). `#06068c` is too dark (near-black) and doesn't match the asbghm.com reference design.
 
-2. **MoneyBoard theme** — The olive/cream theme was tried and rejected. Always use the dark Jeopardy style (dark navy background, blue-purple cells, gold amounts).
+2. **MoneyBoard theme** — The olive/cream theme was tried and rejected. The board keeps the Jeopardy look (navy frame, blue-purple cells, gold amounts); since v3 the pages around it are light like the rest of the platform.
 
 3. **HashRouter over BrowserRouter** — GitHub Pages serves everything from one HTML file; `BrowserRouter` causes 404 on refresh or direct navigation. `HashRouter` works without server config.
 

@@ -30,12 +30,12 @@ export default function Timer({ duration, running, onEnd, total }) {
   }, [running, onEnd]);
 
   const pct = (timeLeft / (total || duration || 1)) * 100;
-  const color = pct > 50 ? 'var(--green)' : pct > 25 ? 'var(--gold)' : 'var(--accent)';
+  const color = pct > 50 ? '#16a34a' : pct > 25 ? '#d97706' : '#dc2626';
 
   return (
     <div className="timer-wrap">
       <svg className="timer-ring" viewBox="0 0 60 60">
-        <circle cx="30" cy="30" r="26" fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="4" />
+        <circle cx="30" cy="30" r="26" fill="none" stroke="var(--surface3, #ebe8e2)" strokeWidth="4" />
         <circle
           cx="30" cy="30" r="26" fill="none"
           stroke={color} strokeWidth="4"
