@@ -5,10 +5,11 @@ import {
   SUPER_POWERS, OPT_KEYS,
 } from '../pages/MoneyBoardPage';
 import { useRoom } from './useRoom';
+import { useCue } from '../sound';
 import {
-  RoomEntry, RoomCode, PlayerList, ConnectionBanner, RoomError,
+  RoomEntry, RoomCode, PlayerList, ConnectionBanner, RoomError, AnswerBySetting,
 } from './RoomKit';
-import { timerProps, timerKey } from './roomUtils';
+import { timerProps, timerKey, isDisplay, canAnswerFor } from './roomUtils';
 
 const TEAM_OPTS = [
   { value: 'A', label: 'الفريق الأول', color: '#5b9aff' },
@@ -33,6 +34,10 @@ export default function MoneyRoom({ onExit }) {
   const cellKey = s?.cell ? `${s.cell.col}-${s.cell.row}-${s.phase}-${s.wrongOpts.length}-${s.timer?.key}` : '';
   const picked = pick && pick.key === cellKey ? pick.i : null;
   const setPicked = i => setPick({ key: cellKey, i });
+  const cellId = s?.cell ? `${s.cell.col}-${s.cell.row}` : '';
+  useCue(s?.phase === 'result' && s.result ? `r${cellId}` : null, s?.result?.winner ? 'correct' : 'wrong');
+  useCue(s?.phase === 'steal' ? `s${cellId}` : null, 'wrong');
+  useCue(s?.phase === 'over' ? 'over' : null, 'win');
 
   if (!s) {
     return (
@@ -43,6 +48,9 @@ export default function MoneyRoom({ onExit }) {
   }
 
   const myTeam = room.me?.team;
+  const tv = isDisplay(room.me);
+  const tvCls = tv ? ' is-tv' : '';
+  const mayAct = canAnswerFor(s, room.me);   // captain-only mode limits picking/answering
   const names = s.teamNames;
   const teams = { A: { ...s.teams.A, name: names.A }, B: { ...s.teams.B, name: names.B } };
   const leave = async () => { await room.leave(); onExit(); };
@@ -54,13 +62,14 @@ export default function MoneyRoom({ onExit }) {
       const next = s.categories.includes(c) ? s.categories.filter(x => x !== c) : [...s.categories, c].slice(0, 6);
       room.act('settings', { categories: next });
     };
-    const ready = TEAM_OPTS.every(t => s.players.some(p => p.team === t.value && p.connected));
+    const ready = TEAM_OPTS.every(t => s.players.some(p => p.team === t.value && p.connected && p.role !== 'display'));
     return (
-      <div className="page mb-setup rk-theme-money">
+      <div className={`page mb-setup rk-theme-money${tvCls}`}>
         <ConnectionBanner room={room} />
         <div className="mb-stage-card mb-setup-card rk-lobby">
           <Marquee />
-          <RoomCode code={s.code} />
+          <RoomCode code={s.code} big={tv} />
+          <AnswerBySetting state={s} room={room} />
           <PlayerList state={s} room={room} teams={teamOpts} onTeam={team => room.act('team', { team })} />
           <div className="cat-select-section">
             <div className="cat-select-head">
@@ -122,12 +131,14 @@ export default function MoneyRoom({ onExit }) {
   );
 
   if (s.phase === 'pick') {
-    const myTurn = myTeam === s.currentTurn;
+    const myTurn = myTeam === s.currentTurn && mayAct;
     return (
-      <div className="mb-game-page rk-theme-money">
+      <div className={`mb-game-page rk-theme-money${tvCls}`}>
+        {tv && <span className="rk-tv-badge">شاشة العرض · {s.code}</span>}
         <ConnectionBanner room={room} />
         <RoomError room={room} />
         <MoneyBoardHeader teams={teams} currentTurn={s.currentTurn} phase={myTurn ? 'pick' : 'wait'} myTeam={myTeam} />
+        {myTeam === s.currentTurn && !mayAct && <p className="rk-captain-note">قائد فريقك هو من يختار السؤال</p>}
         <BoardGrid board={s.board} activeCell={null} canPick={myTurn} currentTurn={s.currentTurn}
           onPickCell={(col, row) => room.act('pick', { col, row })} />
         {modPanel}
@@ -140,7 +151,7 @@ export default function MoneyRoom({ onExit }) {
   const resolved = s.phase === 'result';
   const q = s.question;
   const active = s.activeTeam;
-  const canAnswer = !resolved && myTeam === active;
+  const canAnswer = !resolved && myTeam === active && mayAct;
   const myPowers = s.teams[myTeam]?.powers || [];
   const category = s.board?.[s.cell?.col]?.category;
   const tp = timerProps(s.timer);
@@ -151,7 +162,8 @@ export default function MoneyRoom({ onExit }) {
   };
 
   return (
-    <div className="mb-question-page rk-theme-money">
+    <div className={`mb-question-page rk-theme-money${tvCls}`}>
+      {tv && <span className="rk-tv-badge">شاشة العرض · {s.code}</span>}
       <ConnectionBanner room={room} />
       <RoomError room={room} />
       <div className="q-page-header">
@@ -172,7 +184,7 @@ export default function MoneyRoom({ onExit }) {
         </div>
       )}
 
-      {s.phase === 'question' && myTeam === active && (
+      {s.phase === 'question' && myTeam === active && mayAct && (
         <div className="super-powers-bar">
           <span className="sp-label">قوى {names[myTeam]}:</span>
           {SUPER_POWERS.map(sp => {
@@ -217,7 +229,7 @@ export default function MoneyRoom({ onExit }) {
         })}
       </div>
 
-      {!resolved && !canAnswer && <p className="rk-wait">ينتظر إجابة {names[active]}…</p>}
+      {!resolved && !canAnswer && <p className="rk-wait">{myTeam === active && !mayAct ? 'قائد فريقك هو من يجاوب — تشاوروا!' : `ينتظر إجابة ${names[active]}…`}</p>}
       {s.isHost && !resolved && (
         <button className="rk-link center" onClick={() => room.act('skip')}>تخطّي السؤال (المضيف)</button>
       )}

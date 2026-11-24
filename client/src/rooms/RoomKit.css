@@ -129,3 +129,39 @@
   .rk-code-value { font-size: 2.1rem; }
   .rk-groups.teams { grid-template-columns: 1fr; }
 }
+
+/* ── display screen, QR, captains ── */
+.rk-tv-btn {
+  display: flex; align-items: center; gap: 12px; text-align: right;
+  padding: 12px 14px; border-radius: 14px;
+  background: var(--surface2); border: 1px dashed var(--border-strong);
+}
+.rk-tv-btn:hover:not(:disabled) { border-color: var(--rk-accent); }
+.rk-tv-btn b { display: block; font-weight: 900; font-size: 0.95rem; }
+.rk-tv-btn small { display: block; color: var(--muted); font-size: 0.8rem; line-height: 1.5; margin-top: 2px; }
+.rk-tv-icon { flex: none; width: 34px; height: 24px; border-radius: 5px; border: 3px solid var(--rk-accent); position: relative; }
+.rk-tv-icon::after { content: ''; position: absolute; bottom: -8px; left: 50%; transform: translateX(-50%); width: 14px; height: 3px; border-radius: 2px; background: var(--rk-accent); }
+.rk-qr { display: block; border-radius: 10px; }
+.rk-code .rk-row { justify-content: center; flex-wrap: wrap; }
+.rk-code.big { flex-direction: row; justify-content: center; gap: 28px; padding: 24px; background: var(--surface); border-style: solid; }
+.rk-code-text { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.rk-code.big .rk-code-value { font-size: 4rem; letter-spacing: 0.2em; }
+.rk-screen-line { font-size: 0.85rem; font-weight: 800; color: var(--green); background: var(--green-dim); border-radius: 10px; padding: 7px 12px; text-align: center; }
+.rk-screen-line.away { color: var(--red); background: var(--red-dim); }
+.rk-tag.captain { background: var(--rk-accent); color: var(--rk-ink, #fff); }
+.rk-link.small { font-size: 0.72rem; padding: 0 2px; }
+.rk-setting { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border-radius: 14px; background: var(--surface2); }
+.rk-setting b { display: block; font-weight: 900; font-size: 0.95rem; }
+.rk-setting small { display: block; color: var(--muted); font-size: 0.8rem; line-height: 1.5; margin-top: 2px; }
+.rk-seg { display: flex; gap: 2px; padding: 3px; border-radius: 11px; background: var(--surface); border: 1px solid var(--border); flex: none; }
+.rk-seg button { padding: 7px 12px; border-radius: 8px; font-weight: 800; font-size: 0.85rem; color: var(--muted); }
+.rk-seg button.on { background: var(--rk-accent); color: var(--rk-ink, #fff); }
+.rk-seg button:disabled { opacity: 1; cursor: default; }
+.rk-tv-badge { position: fixed; top: 14px; left: 64px; z-index: 60; font-size: 0.75rem; font-weight: 900; padding: 5px 10px; border-radius: 20px; background: var(--surface); border: 1px solid var(--border); color: var(--muted); box-shadow: var(--shadow-sm); }
+.rk-captain-note { text-align: center; font-weight: 800; color: var(--muted); font-size: 0.9rem; }
+@media (max-width: 720px) {
+  .rk-code.big { flex-direction: column; align-items: center; }
+  .rk-code-text { align-items: center; }
+  .rk-code.big .rk-code-value { font-size: 2.6rem; }
+  .rk-setting { flex-direction: column; align-items: stretch; }
+}

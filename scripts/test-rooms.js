@@ -195,6 +195,50 @@ async function testRobustness(url) {
   console.log('✓ robustness: bad payloads, unknown rooms, rejoin by token, forged token, rate limit');
 }
 
+async function testDisplayAndCaptain(url) {
+  // TV display hosts an Asbiqhum room without playing
+  const tv = client(url), a = client(url), b = client(url);
+  const cr = await tv.req('room:create', { game: 'asbiqhum', display: true });
+  assert(cr.ok, 'display create without a name');
+  await a.req('room:join', { game: 'asbiqhum', code: cr.code, name: 'سارة' });
+  assert.strictEqual((await tv.act('start')).ok, false, 'display alone + 1 player is not enough');
+  await b.req('room:join', { game: 'asbiqhum', code: cr.code, name: 'خالد' });
+  await tv.until(s => s.players.length === 3);
+  const me = tv.state.players.find(p => p.id === tv.state.youId);
+  assert.strictEqual(me.role, 'display');
+  assert(tv.state.isHost, 'display is the host');
+  assert(!(tv.state.youId in tv.state.scores), 'display has no score');
+  assert((await tv.act('start')).ok, 'display starts with 2 real players');
+  await tv.until(s => s.phase === 'question');
+  assert.strictEqual((await tv.act('buzz')).ok, false, 'display cannot buzz');
+  [tv, a, b].forEach(s => s.close());
+
+  // Money with captains: only the captain answers; the host can move the captaincy
+  const h = client(url), a1 = client(url), a2 = client(url), b1 = client(url);
+  const r = await h.req('room:create', { game: 'money', display: true });
+  await a1.req('room:join', { game: 'money', code: r.code, name: 'أحمد', team: 'A' });
+  await a2.req('room:join', { game: 'money', code: r.code, name: 'علي', team: 'A' });
+  await b1.req('room:join', { game: 'money', code: r.code, name: 'منى', team: 'B' });
+  await h.act('settings', { random: true, answerBy: 'captain' });
+  await h.until(s => s.players.length === 4 && s.answerBy === 'captain');
+  const id = n => h.state.players.find(p => p.name === n).id;
+  assert.strictEqual(h.state.captains.A, id('أحمد'), 'earliest member is captain by default');
+  assert((await h.act('captain', { playerId: id('علي') })).ok);
+  await h.until(s => s.captains.A === id('علي'));
+  assert((await h.act('start')).ok);
+  await a1.until(s => s.phase === 'pick');
+  assert.strictEqual((await a1.act('pick', { col: 0, row: 0 })).ok, false, 'non-captain cannot pick');
+  assert((await a2.act('pick', { col: 0, row: 0 })).ok, 'captain picks');
+  const q = (await a2.until(s => s.phase === 'question')).question;
+  assert.strictEqual((await a1.act('answer', { index: 0 })).ok, false, 'non-captain cannot answer');
+  assert((await a2.act('answer', { index: answerIndex(q) })).ok, 'captain answers');
+  // captain drops → teammate takes over automatically
+  a2.disconnect();
+  await h.until(s => s.captains.A === id('أحمد'));
+  [h, a1, b1].forEach(s => s.close());
+  console.log('✓ display seat (no score, host, cannot play) + captains (gate, host change, auto fallback)');
+}
+
 (async () => {
   await new Promise(r => server.listen(0, r));
   const url = `http://localhost:${server.address().port}`;
@@ -203,6 +247,7 @@ async function testRobustness(url) {
     await testAsbiqhum(url);
     await testMoney(url);
     await testHuroof(url);
+    await testDisplayAndCaptain(url);
     const health = await (await fetch(url + '/api/health')).json();
     assert.strictEqual(health.status, 'ok');
     console.log('✓ health', JSON.stringify(health));

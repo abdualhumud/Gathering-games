@@ -110,13 +110,16 @@ io.on('connection', (socket) => {
     return { ok: true, code: room.code, playerId: player.id, token: player.token };
   };
 
-  on('room:create', ({ game, name, team, options }) => {
-    const n = cleanName(name);
+  // display: true → this device is the TV screen: it hosts the room but does not play.
+  on('room:create', ({ game, name, team, options, display }) => {
+    const n = cleanName(name) || (display ? 'شاشة العرض' : '');
     if (!n) return { ok: false, error: 'أدخل اسمك' };
     if (!rooms.types[game]) return { ok: false, error: 'لعبة غير معروفة' };
     leaveCurrent();
     const room = rooms.create(game, options);
-    const { player, error } = room.addPlayer(n, { team: room.game.normaliseTeam ? room.game.normaliseTeam(team) : null });
+    const { player, error } = display
+      ? room.addPlayer(n, { team: null, role: 'display' })
+      : room.addPlayer(n, { team: room.game.normaliseTeam ? room.game.normaliseTeam(team) : null });
     if (error) return { ok: false, error };
     console.log(`[${game}] room ${room.code} created`);
     return seat(room, player);

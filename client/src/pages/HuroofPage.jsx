@@ -9,6 +9,7 @@ import HUROOF_THEMES, {
   getSavedTheme, saveTheme, buildCustomTheme, applyThemeCSS,
 } from '../data/huroof-themes';
 import HuroofRoom from '../rooms/HuroofRoom';
+import { useCue } from '../sound';
 import { hasSeat } from '../rooms/useRoom';
 import { inviteCode } from '../rooms/roomUtils';
 import './HuroofPage.css';
@@ -586,6 +587,9 @@ function GameOver({ teams, grid, counts, winInfo, pathMode, onBack, onHome }) {
 // ── Game Screen ────────────────────────────────────────────────────────────────
 function GameScreen({ teams, pathMode, onBack, onHome }) {
   const g = useGame(teams, pathMode);
+  useCue(g.phase === 'answering' && !g.isSteal ? `a${g.attempt}` : null, 'buzz');
+  useCue(g.result && !g.result.noBuzz && !g.result.timeout ? `r${g.attempt}` : null, g.result?.correct ? 'correct' : 'wrong');
+  useCue(g.phase === 'over' ? 'over' : null, 'win');
 
   if (g.phase === 'over') {
     return <GameOver teams={teams} grid={g.grid} counts={g.counts} winInfo={g.winInfo}

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import MoneyRoom from '../rooms/MoneyRoom';
+import { useCue } from '../sound';
 import { hasSeat } from '../rooms/useRoom';
 import { inviteCode } from '../rooms/roomUtils';
 import { questions as allQuestions, categoryCounts, pickFresh, markSeen, shuffle } from '../questions';
@@ -406,6 +407,9 @@ export default function MoneyBoardPage() {
   const [mode, setMode] = useState(() => (inviteCode() || hasSeat('money') ? 'room' : null)); // null | 'local' | 'room'
   const [modOpen, setModOpen] = useState(false); // moderator panel
   const local = useLocalGame();
+  useCue(local.resultInfo ? `res${local.answeredCount}` : null, local.resultInfo?.isCorrect ? 'correct' : 'wrong');
+  useCue(local.phase === 'steal' ? `steal${local.answeredCount}` : null, 'wrong');
+  useCue(local.screen === 'gameover' ? 'over' : null, 'win');
 
   if (mode === 'room') return <MoneyRoom onExit={() => setMode(null)} />;
 

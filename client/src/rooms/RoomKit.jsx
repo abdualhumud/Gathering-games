@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import QR from 'qrcode';
 import { getServerUrl, setServerUrl } from '../socket';
 import { inviteCode, inviteLink } from './roomUtils';
 import './RoomKit.css';
@@ -72,10 +73,17 @@ export function RoomEntry({ room, logo, teams, defaultTeam, createOptions, onExi
       {room.error && <div className="rk-error shake">{room.error}</div>}
       {room.notice && <div className="rk-notice">{room.notice}</div>}
       {!code && (
-        <button className="rk-btn" disabled={!ready || busy || !name.trim()}
-          onClick={() => run(() => room.create(name.trim(), { ...extra, options: createOptions }))}>
-          إنشاء غرفة جديدة
-        </button>
+        <>
+          <button className="rk-btn" disabled={!ready || busy || !name.trim()}
+            onClick={() => run(() => room.create(name.trim(), { ...extra, options: createOptions }))}>
+            إنشاء غرفة جديدة
+          </button>
+          <button className="rk-tv-btn" disabled={!ready || busy}
+            onClick={() => run(() => room.create('', { display: true, options: createOptions }))}>
+            <span className="rk-tv-icon" aria-hidden="true" />
+            <span><b>افتح هذا الجهاز كشاشة عرض</b><small>للتلفزيون أو اللابتوب: يعرض الأسئلة والنقاط، والكل يلعب من جواله</small></span>
+          </button>
+        </>
       )}
       <div className="rk-or"><span>{code ? 'الانضمام للغرفة' : 'أو انضم برمز'}</span></div>
       <div className="rk-row">
@@ -90,8 +98,26 @@ export function RoomEntry({ room, logo, teams, defaultTeam, createOptions, onExi
 }
 
 // ── Lobby pieces ──────────────────────────────────────────────────────────────
-export function RoomCode({ code }) {
+/** QR code drawn as SVG (synchronous — no canvas, no network). */
+export function QRCode({ value, size = 180 }) {
+  const path = useMemo(() => {
+    const { modules } = QR.create(value, { errorCorrectionLevel: 'M' });
+    const n = modules.size;
+    let d = '';
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) if (modules.get(x, y)) d += `M${x} ${y}h1v1h-1z`;
+    return { d, n };
+  }, [value]);
+  return (
+    <svg className="rk-qr" width={size} height={size} viewBox={`-2 -2 ${path.n + 4} ${path.n + 4}`} role="img" aria-label="رمز QR للانضمام">
+      <rect x="-2" y="-2" width={path.n + 4} height={path.n + 4} fill="#fff" />
+      <path d={path.d} fill="#18181b" shapeRendering="crispEdges" />
+    </svg>
+  );
+}
+
+export function RoomCode({ code, big }) {
   const [copied, setCopied] = useState(false);
+  const [showQr, setShowQr] = useState(false);
   const link = inviteLink(code);
   const share = async () => {
     try {
@@ -99,26 +125,63 @@ export function RoomCode({ code }) {
       else { await navigator.clipboard.writeText(link); setCopied(true); setTimeout(() => setCopied(false), 1800); }
     } catch { /* cancelled */ }
   };
+  if (big) {
+    return (
+      <div className="rk-code big">
+        <QRCode value={link} size={220} />
+        <div className="rk-code-text">
+          <span className="rk-code-label">امسح الرمز بكاميرا الجوال للانضمام</span>
+          <span className="rk-code-label">أو ادخل الموقع واكتب رمز الغرفة</span>
+          <strong className="rk-code-value" dir="ltr">{code}</strong>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="rk-code">
       <span className="rk-code-label">رمز الغرفة</span>
       <strong className="rk-code-value" dir="ltr">{code}</strong>
-      <button className="rk-btn small ghost" onClick={share}>{copied ? 'تم نسخ الرابط ✓' : 'شارك رابط الدعوة'}</button>
+      {showQr && <QRCode value={link} size={170} />}
+      <div className="rk-row">
+        <button className="rk-btn small ghost" onClick={share}>{copied ? 'تم نسخ الرابط ✓' : 'شارك رابط الدعوة'}</button>
+        <button className="rk-btn small ghost" onClick={() => setShowQr(q => !q)}>{showQr ? 'إخفاء QR' : 'رمز QR'}</button>
+      </div>
+    </div>
+  );
+}
+
+/** Host setting for team games: who may answer for a team. */
+export function AnswerBySetting({ state, room }) {
+  return (
+    <div className="rk-setting">
+      <div>
+        <b>من يجاوب عن الفريق؟</b>
+        <small>{state.answerBy === 'captain' ? 'القائد فقط يختار ويجاوب — المضيف يغيّر القائد من قائمة اللاعبين.' : 'أي عضو في الفريق — أول ضغطة تُحسب.'}</small>
+      </div>
+      <div className="rk-seg">
+        <button className={state.answerBy !== 'captain' ? 'on' : ''} disabled={!state.isHost} onClick={() => room.act('settings', { answerBy: 'any' })}>أي عضو</button>
+        <button className={state.answerBy === 'captain' ? 'on' : ''} disabled={!state.isHost} onClick={() => room.act('settings', { answerBy: 'captain' })}>القائد فقط</button>
+      </div>
     </div>
   );
 }
 
 export function PlayerList({ state, room, teams, onTeam }) {
+  const playing = state.players.filter(p => p.role !== 'display');
+  const screen = state.players.find(p => p.role === 'display');
+  const captainMode = state.answerBy === 'captain';
   const groups = teams
-    ? teams.map(t => ({ ...t, players: state.players.filter(p => p.team === t.value) }))
-    : [{ value: null, label: `اللاعبون (${state.players.length})`, players: state.players }];
+    ? teams.map(t => ({ ...t, players: playing.filter(p => p.team === t.value) }))
+    : [{ value: null, label: `اللاعبون (${playing.length})`, players: playing }];
   return (
+    <>
+    {screen && <div className={`rk-screen-line ${screen.connected ? '' : 'away'}`}>شاشة العرض {screen.connected ? 'متصلة' : 'غير متصلة'}{screen.id === state.hostId ? ' — وهي المضيف' : ''}</div>}
     <div className={`rk-groups ${teams ? 'teams' : ''}`}>
       {groups.map(g => (
         <div key={String(g.value)} className="rk-group" style={g.color ? { '--tc': g.color } : {}}>
           <div className="rk-group-head">
             <span>{g.label}{teams ? ` (${g.players.length})` : ''}</span>
-            {teams && onTeam && room.me && room.me.team !== g.value && (
+            {teams && onTeam && room.me && room.me.role !== 'display' && room.me.team !== g.value && (
               <button className="rk-link" onClick={() => onTeam(g.value)}>انتقل هنا</button>
             )}
           </div>
@@ -126,9 +189,13 @@ export function PlayerList({ state, room, teams, onTeam }) {
             <div key={p.id} className={`rk-player ${p.connected ? '' : 'away'}`}>
               <span className="rk-avatar">{p.name.slice(0, 1)}</span>
               <span className="rk-pname">{p.name}</span>
+              {captainMode && state.captains?.[p.team] === p.id && <span className="rk-tag captain">القائد</span>}
               {p.id === state.hostId && <span className="rk-tag">المضيف</span>}
               {p.id === state.youId && <span className="rk-tag you">أنت</span>}
               {!p.connected && <span className="rk-tag away">غير متصل</span>}
+              {state.isHost && captainMode && teams && state.captains?.[p.team] !== p.id && (
+                <button className="rk-link small" onClick={() => room.act('captain', { playerId: p.id })}>اجعله القائد</button>
+              )}
               {state.isHost && p.id !== state.youId && (
                 <button className="rk-kick" title="إخراج" onClick={() => room.act('kick', { playerId: p.id })}>✕</button>
               )}
@@ -138,6 +205,7 @@ export function PlayerList({ state, room, teams, onTeam }) {
         </div>
       ))}
     </div>
+    </>
   );
 }
 

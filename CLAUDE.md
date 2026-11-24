@@ -319,6 +319,17 @@ so reconnecting = "send me the state again".
 
 Games: `asbiqhum` · `money` · `huroof`. Server → client also `room:kicked`, `room:replaced`.
 
+- **TV display seat:** `room:create {display: true}` (no name needed) creates a seat with
+  `role: 'display'` that hosts the room but never plays — no team, no score, cannot buzz/answer,
+  not counted by `room.activePlayers()` (use that, not `connectedPlayers()`, for game rules).
+  Clients render the same room screens read-only and larger (`.is-tv`, `isDisplay(me)`); its
+  lobby shows a big QR code + code (`<RoomCode big>`). Phones show a small «رمز QR» toggle.
+- **Team captains** (MoneyBoard, Huroof): setting `answerBy: 'any' | 'captain'` (`<AnswerBySetting>`).
+  In captain mode only `captainOf(team)` may pick/use powers/answer (Money) or answer/select
+  (Huroof; buzzing stays open to everyone). Captain = host's choice (`captain {playerId}`),
+  else the earliest-joined connected member — so a dropped captain is replaced automatically.
+  Client gate: `canAnswerFor(state, me)` in `rooms/roomUtils.js`.
+
 - **Seats:** public player `id` + secret `token` (stored per game in `localStorage` key
   `gg-room-<game>`); the page reopens the room automatically if a seat exists or the URL has
   `?room=CODE` (invite link). In the lobby a disconnected seat is freed after 30 s; mid-game it is kept.
@@ -341,6 +352,13 @@ site (`/Gathering-games/`) and the sockets. Free instances sleep after ~15 min i
 request takes ~1 min); rooms are in memory and reset on restart/deploy.
 
 ---
+
+## Sound effects
+
+`client/src/sound.js` synthesizes all sounds with Web Audio (no files): `buzz`, `correct`,
+`wrong`, `tick` (last 5 s of any `<Timer>`), `timeup`, `win`, `start`. `useCue(key, sound)` plays
+when `key` changes to a new truthy value (the first value is skipped, so re-joining doesn't
+replay). Mute is per device (`gg-muted`), toggled by `<SoundToggle>` shown on every game page.
 
 ## GitHub Pages Deployment
 

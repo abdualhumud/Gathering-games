@@ -1,6 +1,7 @@
 import { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import AsbiqhumRoom from '../rooms/AsbiqhumRoom';
+import { useCue } from '../sound';
 import { hasSeat } from '../rooms/useRoom';
 import { inviteCode } from '../rooms/roomUtils';
 import { getRandomQuestions } from '../questions';
@@ -138,6 +139,9 @@ export default function AsbiqhumPage() {
   const [mode, setMode] = useState(() => (inviteCode() || hasSeat('asbiqhum') ? 'room' : null)); // null | 'local' | 'room'
 
   const local = useLocalGame();
+  useCue(local.screen === 'buzzed' ? `b${local.qIndex}` : null, 'buzz');
+  useCue(local.screen === 'result' && local.answerResult ? `r${local.qIndex}` : null, local.answerResult?.isCorrect ? 'correct' : 'wrong');
+  useCue(local.screen === 'gameover' ? 'over' : null, 'win');
 
   if (mode === 'room') return <AsbiqhumRoom onExit={() => setMode(null)} />;
 

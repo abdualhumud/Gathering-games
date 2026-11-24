@@ -18,3 +18,9 @@ export function timerProps(timer) {
   return { duration: timer.remaining, total: timer.duration, running: true };
 }
 export const timerKey = timer => (timer ? `t${timer.key}` : 'none');
+
+/** May `me` answer / pick for their team? (captain-only mode restricts it; the TV never plays) */
+export const canAnswerFor = (state, me) =>
+  !!me && me.role !== 'display' && (state.answerBy !== 'captain' || state.captains?.[me.team] === me.id);
+
+export const isDisplay = me => !!me && me.role === 'display';

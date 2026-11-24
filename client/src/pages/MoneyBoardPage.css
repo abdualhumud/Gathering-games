@@ -453,3 +453,17 @@
   .mb-cell { min-height: 48px; }
   .cell-points { font-size: 1.2rem; }
 }
+
+/* ── TV display screen ── */
+.is-tv .mb-board-frame, .is-tv.mb-game-page .mb-header { max-width: 1400px; }
+.is-tv .mb-header-cell { font-size: 1.2rem; min-height: 86px; }
+.is-tv .mb-cell-pair .mb-cell { min-height: 100px; }
+.is-tv .mb-cell-pair .cell-points { font-size: 2.4rem; }
+.is-tv .score-money { font-size: 2.4rem; }
+.is-tv.mb-question-page > *, .is-tv .q-page-header { max-width: 1200px; }
+.is-tv.mb-question-page .question-card { min-height: 280px; }
+.is-tv.mb-question-page .question-text { font-size: 2.8rem; }
+.is-tv.mb-question-page .option-btn { font-size: 1.6rem; min-height: 86px; }
+.is-tv.mb-question-page .option-btn:disabled { opacity: 1; }
+.is-tv.mb-question-page .option-btn.opt-dim { opacity: 0.4; }
+.is-tv .mb-setup-card { max-width: 1000px; }

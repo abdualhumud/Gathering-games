@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
+import { play } from '../sound';
 import './Timer.css';
 
 // `total` (optional) is the full length of the phase — lets a timer that
@@ -20,9 +21,11 @@ export default function Timer({ duration, running, onEnd, total }) {
       setTimeLeft(t => {
         if (t <= 1) {
           clearInterval(intervalRef.current);
+          play('timeup');
           onEnd?.();
           return 0;
         }
+        if (t <= 6) play('tick');   // last 5 seconds
         return t - 1;
       });
     }, 1000);

@@ -28,6 +28,8 @@ class MoneyBoardGame extends BaseGame {
     this.categories = [];
     this.usedIds = new Set();
     this.teamNames = { A: 'الفريق الأول', B: 'الفريق الثاني' };
+    this.answerBy = 'any';
+    this.captains = { A: null, B: null };
     this.resetMatch();
   }
 
@@ -72,12 +74,14 @@ class MoneyBoardGame extends BaseGame {
           this.categories = cats;
         }
         if (data.random) this.categories = shuffle(VALID_CATEGORIES).slice(0, 6);
+        if (data.answerBy === 'any' || data.answerBy === 'captain') this.answerBy = data.answerBy;
         for (const t of TEAMS) {
           const name = data.teamNames && typeof data.teamNames[t] === 'string' ? data.teamNames[t].trim().slice(0, 20) : '';
           if (name) this.teamNames[t] = name;
         }
         return null;
       }
+      case 'captain': return this.setCaptain(player, data.playerId);
       case 'start': return this.start(player);
       case 'pick': return this.pick(player, data.col, data.row);
       case 'power': return this.usePower(player, data.power);
@@ -110,7 +114,7 @@ class MoneyBoardGame extends BaseGame {
     if (this.phase !== 'lobby') return 'اللعبة بدأت';
     if (this.categories.length !== 6) return 'اختر 6 فئات';
     for (const t of TEAMS) {
-      if (!this.room.connectedPlayers().some(p => p.team === t)) return `يحتاج ${this.teamNames[t]} لاعباً واحداً على الأقل`;
+      if (!this.room.activePlayers().some(p => p.team === t)) return `يحتاج ${this.teamNames[t]} لاعباً واحداً على الأقل`;
     }
     this.resetMatch();
     this.buildBoard();
@@ -145,6 +149,7 @@ class MoneyBoardGame extends BaseGame {
   pick(player, col, row) {
     if (this.phase !== 'pick') return 'انتظر';
     if (player.team !== this.currentTurn) return 'ليس دور فريقك';
+    { const g = this.captainGate(player); if (g) return g; }
     if (!isIndex(col, this.board.length) || !isIndex(row, POINTS.length)) return 'خانة غير صالحة';
     const c = this.board[col].cells[row];
     if (c.answered) return 'الخانة مستخدمة';
@@ -161,6 +166,7 @@ class MoneyBoardGame extends BaseGame {
   usePower(player, power) {
     if (this.phase !== 'question') return 'القوى قبل الإجابة فقط';
     if (player.team !== this.activeTeam) return 'ليس دور فريقك';
+    { const g = this.captainGate(player); if (g) return g; }
     const mine = this.teams[player.team].powers;
     if (!POWERS.includes(power) || !mine.includes(power)) return 'القوة غير متاحة';
     if (this.effects[power]) return 'مفعّلة بالفعل';
@@ -187,6 +193,7 @@ class MoneyBoardGame extends BaseGame {
   answer(player, index) {
     if (this.phase !== 'question' && this.phase !== 'steal') return 'لا يوجد سؤال';
     if (player.team !== this.activeTeam) return 'ليس دور فريقك';
+    { const g = this.captainGate(player); if (g) return g; }
     const q = this.currentCell().question;
     if (!isIndex(index, q.options.length) || this.wrongOpts.includes(index)) return 'اختيار غير صالح';
     if (q.options[index] === q.answer) this.correct(player, index);
@@ -252,6 +259,8 @@ class MoneyBoardGame extends BaseGame {
       categories: this.categories,
       allCategories: CATEGORY_COUNTS,
       teamNames: this.teamNames,
+      answerBy: this.answerBy,
+      captains: { A: this.captainOf('A'), B: this.captainOf('B') },
       teams: this.teams,
       stats: this.stats,
       currentTurn: this.currentTurn,

@@ -4,10 +4,11 @@ import {
   AsbiqLogo, AsbiqHud, AsbiqStrip, AsbiqVerdict, AsbiqPodium, OPT_KEYS, pcStyle,
 } from '../pages/AsbiqhumPage';
 import { useRoom } from './useRoom';
+import { useCue } from '../sound';
 import {
   RoomEntry, RoomCode, PlayerList, ConnectionBanner, RoomError,
 } from './RoomKit';
-import { timerProps, timerKey } from './roomUtils';
+import { timerProps, timerKey, isDisplay } from './roomUtils';
 
 const COUNTS = [5, 10, 15, 20];
 
@@ -19,11 +20,15 @@ export default function AsbiqhumRoom({ onExit }) {
   const pickKey = `${s?.question?.id}-${s?.phase}`;
   const picked = pick && pick.key === pickKey ? pick.i : null;
   const setPicked = i => setPick({ key: pickKey, i });
+  useCue(s?.phase === 'buzzed' ? `${s.question?.id}-${s.buzzerId}` : null, 'buzz');
+  useCue(s?.lastWrong ? `${s.question?.id}-${s.lastWrong.playerId}` : null, 'wrong');
+  useCue(s?.phase === 'result' && s.result && s.result.kind !== 'timeout' ? `${s.question?.id}-r` : null, s?.result?.kind === 'correct' ? 'correct' : 'wrong');
+  useCue(s?.phase === 'over' ? 'over' : null, 'win');
 
   // Space bar buzzes (handy on laptops)
   useEffect(() => {
     const onKey = e => {
-      if (e.code === 'Space' && room.state?.phase === 'question') { e.preventDefault(); room.act('buzz'); }
+      if (e.code === 'Space' && room.state?.phase === 'question' && !isDisplay(room.me)) { e.preventDefault(); room.act('buzz'); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -37,17 +42,18 @@ export default function AsbiqhumRoom({ onExit }) {
     );
   }
 
-  const players = s.players.map((p, i) => ({ ...p, score: s.scores[p.id] || 0, color: i }));
+  const tv = isDisplay(room.me);
+  const players = s.players.filter(p => p.role !== 'display').map((p, i) => ({ ...p, score: s.scores[p.id] || 0, color: i }));
   const byId = Object.fromEntries(players.map(p => [p.id, p]));
   const leave = async () => { await room.leave(); onExit(); };
 
   if (s.phase === 'lobby') {
     return (
-      <div className="asb asb-center rk-theme-asbiq">
+      <div className={`asb asb-center rk-theme-asbiq ${tv ? 'is-tv' : ''}`}>
         <ConnectionBanner room={room} />
         <div className="asbiq-panel rk-lobby">
-          <AsbiqLogo small />
-          <RoomCode code={s.code} />
+          <AsbiqLogo small={!tv} />
+          <RoomCode code={s.code} big={tv} />
           {s.isHost && (
             <div className="asbiq-section-head">
               <h3>عدد الأسئلة</h3>
@@ -73,7 +79,7 @@ export default function AsbiqhumRoom({ onExit }) {
 
   if (s.phase === 'over') {
     return (
-      <div className="asb asb-play asb-over rk-theme-asbiq">
+      <div className={`asb asb-play asb-over rk-theme-asbiq ${tv ? 'is-tv' : ''}`}>
         <ConnectionBanner room={room} />
         <AsbiqPodium players={players} />
         <div className="asbiq-actions">
@@ -96,7 +102,8 @@ export default function AsbiqhumRoom({ onExit }) {
   const who = r && byId[r.playerId]?.name;
 
   return (
-    <div className="asb asb-play rk-theme-asbiq">
+    <div className={`asb asb-play rk-theme-asbiq ${tv ? 'is-tv' : ''}`}>
+      {tv && <span className="rk-tv-badge">شاشة العرض · {s.code}</span>}
       <ConnectionBanner room={room} />
       <RoomError room={room} />
       <AsbiqHud index={s.qIndex} total={s.total} category={q?.category}>
@@ -110,7 +117,9 @@ export default function AsbiqhumRoom({ onExit }) {
       {s.phase === 'question' && (
         <div className="asbiq-buzz-zone">
           {s.lastWrong && <p className="asbiq-room-note">{byId[s.lastWrong.playerId]?.name} أخطأ — الفرصة لكم!</p>}
-          {meLocked
+          {tv
+            ? <p className="asbiq-tv-wait">من يعرف الجواب؟ اضغطوا الجرس من جوالاتكم!</p>
+            : meLocked
             ? <p className="asbiq-room-note">أجبت خطأ في هذا السؤال — انتظر الباقين</p>
             : (
               <button className="asbiq-buzzer asbiq-buzzer-solo" style={pcStyle(byId[s.youId]?.color)}
@@ -128,10 +137,10 @@ export default function AsbiqhumRoom({ onExit }) {
             <span className="asbiq-avatar">{buzzer?.name.slice(0, 1)}</span>
             {iAnswer ? <><b>أنت</b> سبقتهم! اختر الإجابة</> : <><b>{buzzer?.name}</b> ضغط الجرس…</>}
           </div>
-          {iAnswer && (
+          {(iAnswer || tv) && (
             <div className="asbiq-options">
               {q.options.map((opt, i) => (
-                <button key={i} className="asbiq-opt" disabled={picked !== null}
+                <button key={i} className="asbiq-opt" disabled={!iAnswer || picked !== null}
                   onClick={() => { setPicked(i); room.act('answer', { index: i }); }}>
                   <span className="asbiq-opt-key">{OPT_KEYS[i]}</span>
                   <span>{opt}</span>

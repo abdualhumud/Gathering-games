@@ -342,3 +342,20 @@
   .step-3 .asbiq-step-block { height: 62px; }
   .asbiq-panel { padding: 20px 16px; }
 }
+
+/* ── TV display screen ── */
+.asbiq-tv-wait { font-size: 1.6rem; font-weight: 900; color: var(--accent); text-align: center; padding: 26px 0; animation: pulse 1.8s ease-in-out infinite; }
+.asb.is-tv .asbiq-panel { max-width: 860px; }
+.asb.is-tv.asb-play > * { max-width: 1200px; }
+.asb.is-tv .asbiq-qcard { min-height: 300px; }
+.asb.is-tv .asbiq-qcard .question-text { font-size: 3rem; }
+.asb.is-tv .asbiq-opt { font-size: 1.6rem; min-height: 88px; }
+.asb.is-tv .asbiq-opt:disabled { opacity: 1; }
+.asb.is-tv .asbiq-buzzed-banner { font-size: 1.5rem; padding: 18px 22px; }
+.asb.is-tv .asbiq-strip-item { padding: 8px 18px 8px 8px; }
+.asb.is-tv .asbiq-strip-name, .asb.is-tv .asbiq-strip-item b { font-size: 1.2rem; }
+.asb.is-tv .asbiq-strip-item .asbiq-avatar { width: 36px; height: 36px; font-size: 1rem; }
+.asb.is-tv .asbiq-hud-timer .timer-wrap { width: 92px; height: 92px; }
+.asb.is-tv .asbiq-hud-timer .timer-number { font-size: 2rem; }
+.asb.is-tv .asbiq-verdict h2 { font-size: 2.4rem; }
+.asb > .rk-tv-badge { width: auto; }

@@ -490,3 +490,13 @@
 .huroof-my-team { font-size: 0.78rem; font-weight: 900; padding: 4px 10px; border-radius: 20px; border: 1px solid; white-space: nowrap; }
 .opt-btn.opt-picked { outline: 2px solid var(--huroof-accent, #22c55e); }
 .huroof-room-buzz { grid-column: 1 / -1; min-height: 96px; font-size: 1.4rem !important; }
+
+/* ── TV display screen ── */
+.huroof-tv-wait { grid-column: 1 / -1; text-align: center; font-size: 1.4rem; font-weight: 900; color: var(--huroof-accent); animation: pulse 1.8s ease-in-out infinite; }
+.is-tv .buzzer-card { max-width: 900px; padding: 40px 48px; }
+.is-tv .buzzer-card .q-text { font-size: 2.2rem; }
+.is-tv .buzzer-card .opt-btn { font-size: 1.4rem; padding: 20px; }
+.is-tv .buzzer-card .opt-btn:disabled { opacity: 1; }
+.is-tv .buzzer-card .opt-btn.opt-dim { opacity: 0.4; }
+.is-tv .letter-badge { width: 96px; height: 96px; font-size: 3rem; }
+.huroof-setup.is-tv .rk-lobby { max-width: 900px; }

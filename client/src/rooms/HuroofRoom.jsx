@@ -2,8 +2,9 @@ import { useState } from 'react';
 import Timer from '../components/Timer';
 import { HexGrid, ScoreBar, rgba, PATH_GOAL } from '../pages/HuroofPage';
 import { useRoom } from './useRoom';
-import { RoomEntry, RoomCode, PlayerList, ConnectionBanner, RoomError } from './RoomKit';
-import { timerProps, timerKey } from './roomUtils';
+import { useCue } from '../sound';
+import { RoomEntry, RoomCode, PlayerList, ConnectionBanner, RoomError, AnswerBySetting } from './RoomKit';
+import { timerProps, timerKey, isDisplay, canAnswerFor } from './roomUtils';
 
 const TEAM_OPTS = [
   { value: 0, label: 'الفريق الأخضر', color: '#22c55e' },
@@ -26,6 +27,9 @@ export default function HuroofRoom({ onExit }) {
   const [pick, setPick] = useState(null);
   const pickKey = `${s?.question?.id}-${s?.answering}-${s?.isSteal}`;
   const picked = pick && pick.key === pickKey ? pick.i : null;
+  useCue(s?.phase === 'answering' && !s.isSteal ? `${s.question?.id}-${s.answering}` : null, 'buzz');
+  useCue(s?.phase === 'result' && s.result && !s.result.noBuzz && !s.result.timeout ? `${s.question?.id}-${s.answering}-r` : null, s?.result?.correct ? 'correct' : 'wrong');
+  useCue(s?.phase === 'over' ? 'over' : null, 'win');
 
   if (!s) {
     return (
@@ -36,18 +40,22 @@ export default function HuroofRoom({ onExit }) {
   }
 
   const myTeam = room.me?.team;
+  const tv = isDisplay(room.me);
+  const tvCls = tv ? ' is-tv' : '';
+  const mayAct = canAnswerFor(s, room.me);
   const teams = s.teams;
   const pathMode = s.winMode === 'path';
   const leave = async () => { await room.leave(); onExit(); };
 
   if (s.phase === 'lobby') {
-    const ready = [0, 1].every(t => s.players.some(p => p.team === t && p.connected));
+    const ready = [0, 1].every(t => s.players.some(p => p.team === t && p.connected && p.role !== 'display'));
     return (
-      <div className="page huroof-setup rk-theme-huroof">
+      <div className={`page huroof-setup rk-theme-huroof${tvCls}`}>
         <ConnectionBanner room={room} />
         <div className="setup-card card rk-lobby">
           <Logo />
-          <RoomCode code={s.code} />
+          <RoomCode code={s.code} big={tv} />
+          <AnswerBySetting state={s} room={room} />
           <PlayerList state={s} room={room} teams={TEAM_OPTS.map((t, i) => ({ ...t, label: `${t.label} · ${pathMode ? PATH_GOAL[i].split(' ')[0] : ''}` }))}
             onTeam={team => room.act('team', { team })} />
           <div className="grid-size-select">
@@ -101,7 +109,7 @@ export default function HuroofRoom({ onExit }) {
   const letter = s.grid[s.activeIdx]?.letter;
   const ctrl = s.control !== null ? teams[s.control] : null;
   const ans = s.answering !== null ? teams[s.answering] : null;
-  const canSelect = s.phase === 'select' && (s.control === null || s.control === myTeam || s.isHost);
+  const canSelect = s.phase === 'select' && (s.isHost || ((s.control === null || s.control === myTeam) && mayAct));
   const label = {
     pre: `استعدوا… حرف «${letter ?? ''}»`,
     buzzing: 'اضغط الجرس!',
@@ -115,7 +123,8 @@ export default function HuroofRoom({ onExit }) {
   const myColor = teams[myTeam]?.color;
 
   return (
-    <div className="huroof-game-page rk-theme-huroof">
+    <div className={`huroof-game-page rk-theme-huroof${tvCls}`}>
+      {tv && <span className="rk-tv-badge">شاشة العرض · {s.code}</span>}
       <ConnectionBanner room={room} />
       <RoomError room={room} />
       <div className="huroof-header">
@@ -157,11 +166,13 @@ export default function HuroofRoom({ onExit }) {
             <p className="q-text">{q.text}</p>
             <Timer key={timerKey(s.timer)} {...tp} />
             <div className="buzzer-team-grid">
+              {tv ? <p className="huroof-tv-wait">اضغطوا الجرس من جوالاتكم!</p> : (
               <button className="buzzer-btn huroof-room-buzz"
                 style={{ '--bt': myColor, '--bt-dim': rgba(myColor, 0.2), '--bt-glow': rgba(myColor, 0.45) }}
                 onClick={() => { navigator.vibrate?.(40); room.act('buzz'); }}>
                 🔔 {teams[myTeam]?.name}
               </button>
+              )}
             </div>
             {s.isHost && <button className="skip-q-btn" onClick={() => room.act('skip')}>🔄 سؤال آخر لنفس الحرف</button>}
           </div>
@@ -184,7 +195,7 @@ export default function HuroofRoom({ onExit }) {
                 const revealed = s.phase === 'result';
                 const cls = !revealed ? (picked === i ? 'opt-picked' : '')
                   : opt === q.answer ? 'opt-correct' : s.selected === i ? 'opt-wrong' : 'opt-dim';
-                const mine = s.answering === myTeam && s.phase === 'answering';
+                const mine = s.answering === myTeam && s.phase === 'answering' && mayAct;
                 return (
                   <button key={i} className={`opt-btn ${cls}`} disabled={!mine || picked !== null}
                     onClick={() => { setPick({ key: pickKey, i }); room.act('answer', { index: i }); }}>
@@ -194,6 +205,7 @@ export default function HuroofRoom({ onExit }) {
               })}
             </div>
             {s.phase === 'answering' && s.answering !== myTeam && <p className="rk-wait">ينتظر إجابة {ans.name}…</p>}
+            {s.phase === 'answering' && s.answering === myTeam && !mayAct && <p className="rk-wait">قائد فريقك هو من يجاوب — تشاوروا!</p>}
           </div>
         </div>
       )}

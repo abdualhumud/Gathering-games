@@ -34,6 +34,29 @@ class BaseGame {
   }
 
   isHost(player) { return this.room.hostId === player.id; }
+
+  // ── Team captains (MoneyBoard / Huroof) ──
+  // answerBy 'any': any member answers (first tap counts); 'captain': only the captain.
+  // The captain is whoever the host chose, else the earliest-joined connected member,
+  // so a captain who drops out is replaced automatically.
+  captainOf(team) {
+    const chosen = this.room.players.get(this.captains && this.captains[team]);
+    if (chosen && chosen.connected && chosen.team === team) return chosen.id;
+    const first = this.room.activePlayers().filter(p => p.team === team).sort((a, b) => a.joinedAt - b.joinedAt)[0];
+    return first ? first.id : null;
+  }
+  /** Error text if `player` may not answer for their team right now, else null. */
+  captainGate(player) {
+    if (this.answerBy !== 'captain') return null;
+    return this.captainOf(player.team) === player.id ? null : 'قائد الفريق هو من يجاوب';
+  }
+  setCaptain(actor, playerId) {
+    if (!this.isHost(actor)) return 'المضيف فقط يحدد القائد';
+    const p = this.room.players.get(playerId);
+    if (!p || p.role === 'display' || p.team === null || p.team === undefined) return 'لاعب غير موجود';
+    this.captains[p.team] = p.id;
+    return null;
+  }
   players() { return [...this.room.players.values()]; }
 }
 

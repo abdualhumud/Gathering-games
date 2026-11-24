@@ -59,6 +59,8 @@ class HuroofGame extends BaseGame {
     super(room);
     this.winMode = options.winMode === 'majority' ? 'majority' : 'path';
     this.usedIds = new Set();
+    this.answerBy = 'any';
+    this.captains = { 0: null, 1: null };
     this.resetMatch();
   }
 
@@ -93,19 +95,22 @@ class HuroofGame extends BaseGame {
       case 'settings': {
         if (!this.isHost(player) || this.phase !== 'lobby') return 'للمضيف قبل البدء فقط';
         if (data.winMode === 'path' || data.winMode === 'majority') this.winMode = data.winMode;
+        if (data.answerBy === 'any' || data.answerBy === 'captain') this.answerBy = data.answerBy;
         return null;
       }
+      case 'captain': return this.setCaptain(player, data.playerId);
       case 'start': {
         if (!this.isHost(player)) return 'المضيف فقط يبدأ اللعبة';
         if (this.phase !== 'lobby') return 'اللعبة بدأت';
         for (const t of [0, 1]) {
-          if (!this.room.connectedPlayers().some(p => p.team === t)) return `يحتاج ${TEAMS[t].name} لاعباً واحداً على الأقل`;
+          if (!this.room.activePlayers().some(p => p.team === t)) return `يحتاج ${TEAMS[t].name} لاعباً واحداً على الأقل`;
         }
         this.resetMatch();
         this.goPre(CENTER);
         return null;
       }
       case 'buzz': {
+        if (player.team !== 0 && player.team !== 1) return 'شاشة العرض لا تلعب';
         if (this.phase !== 'buzzing') return null;   // too late: ignore quietly
         this.answering = player.team;
         this.queue = [1 - player.team];
@@ -118,6 +123,7 @@ class HuroofGame extends BaseGame {
       case 'answer': {
         if (this.phase !== 'answering') return 'لا يوجد سؤال';
         if (player.team !== this.answering) return 'ليس دور فريقك';
+        { const g = this.captainGate(player); if (g) return g; }
         if (!isIndex(data.index, this.question.options.length)) return 'اختيار غير صالح';
         this.answeredBy = player.name;
         this.resolve(this.question.options[data.index] === this.question.answer, false, data.index);
@@ -132,6 +138,7 @@ class HuroofGame extends BaseGame {
       case 'select': {
         if (this.phase !== 'select') return 'انتظر';
         if (this.control !== null && player.team !== this.control && !this.isHost(player)) return 'ليس دور فريقك';
+        if (!this.isHost(player)) { const g = this.captainGate(player); if (g) return g; }
         if (!isIndex(data.index, TOTAL) || this.grid[data.index].owner !== null) return 'اختر حرفاً متاحاً';
         this.goPre(data.index);
         return null;
@@ -240,6 +247,8 @@ class HuroofGame extends BaseGame {
     return {
       phase: this.phase,
       winMode: this.winMode,
+      answerBy: this.answerBy,
+      captains: { 0: this.captainOf(0), 1: this.captainOf(1) },
       teams: TEAMS,
       grid: this.grid,
       activeIdx: this.activeIdx,

@@ -33,7 +33,7 @@ class AsbiqhumGame extends BaseGame {
     this.timeLeftMs = 0;    // question clock when paused by a buzz
   }
 
-  onJoin(p) { this.scores[p.id] = 0; }
+  onJoin(p) { if (p.role !== 'display') this.scores[p.id] = 0; }
   onLeave(p) { delete this.scores[p.id]; }
 
   handle(player, type, data) {
@@ -65,7 +65,7 @@ class AsbiqhumGame extends BaseGame {
   start(player) {
     if (!this.isHost(player)) return 'المضيف فقط يبدأ اللعبة';
     if (this.phase !== 'lobby') return 'اللعبة بدأت';
-    if (this.room.connectedPlayers().length < 2) return 'تحتاج لاعبَين على الأقل';
+    if (this.room.activePlayers().length < 2) return 'تحتاج لاعبَين على الأقل';
     let pool = questions.filter(q => !this.usedIds.has(q.id));
     if (pool.length < this.total) { this.usedIds.clear(); pool = questions; }
     this.resetRound();
@@ -93,6 +93,7 @@ class AsbiqhumGame extends BaseGame {
   }
 
   buzz(player) {
+    if (player.role === 'display') return 'شاشة العرض لا تلعب';
     if (this.phase !== 'question') return null;          // late buzz: silently ignored
     if (this.locked.has(player.id)) return 'أجبت خطأ في هذا السؤال';
     this.timeLeftMs = this.msLeft();
@@ -119,7 +120,7 @@ class AsbiqhumGame extends BaseGame {
   wrong(playerId, index, timedOut) {
     this.scores[playerId] = Math.max(0, (this.scores[playerId] || 0) + WRONG_PENALTY);
     this.locked.add(playerId);
-    const others = this.room.connectedPlayers().filter(p => !this.locked.has(p.id));
+    const others = this.room.activePlayers().filter(p => !this.locked.has(p.id));
     const lastWrong = { playerId, selected: index, timedOut };
     if (others.length && this.timeLeftMs > 2000) {
       this.lastWrong = lastWrong;

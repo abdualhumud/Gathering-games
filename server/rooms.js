@@ -49,13 +49,15 @@ class Room {
 
   // ── players ──
   connectedPlayers() { return [...this.players.values()].filter(p => p.connected); }
+  /** Connected seats that actually play (the TV display seat does not). */
+  activePlayers() { return this.connectedPlayers().filter(p => p.role !== 'display'); }
 
   addPlayer(name, extra = {}) {
     if (this.players.size >= MAX_PLAYERS) return { error: 'الغرفة ممتلئة' };
     let finalName = name;
     const taken = new Set([...this.players.values()].map(p => p.name));
     for (let n = 2; taken.has(finalName); n++) finalName = `${name} ${n}`;
-    const player = { id: randId(6), token: randId(18), name: finalName, connected: true, team: null, socketId: null, joinedAt: Date.now(), ...extra };
+    const player = { id: randId(6), token: randId(18), name: finalName, connected: true, team: null, role: 'player', socketId: null, joinedAt: Date.now(), ...extra };
     const err = this.game.canJoin ? this.game.canJoin(player) : null;
     if (err) return { error: err };
     this.players.set(player.id, player);
@@ -118,7 +120,7 @@ class Room {
       isHost: viewerId === this.hostId,
       players: [...this.players.values()]
         .sort((a, b) => a.joinedAt - b.joinedAt)
-        .map(p => ({ id: p.id, name: p.name, team: p.team, connected: p.connected })),
+        .map(p => ({ id: p.id, name: p.name, team: p.team, role: p.role, connected: p.connected })),
     };
   }
 
