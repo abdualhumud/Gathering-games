@@ -104,7 +104,7 @@ export function getSavedTheme() {
     // Stored as custom JSON object
     const obj = JSON.parse(raw);
     if (obj && obj.teamA) return obj;
-  } catch (_) { /* ignore */ }
+  } catch { /* ignore */ }
   return HUROOF_THEMES.classic;
 }
 
@@ -116,7 +116,7 @@ export function saveTheme(themeOrId) {
     } else {
       localStorage.setItem(THEME_KEY, JSON.stringify(themeOrId));
     }
-  } catch (_) { /* ignore */ }
+  } catch { /* ignore */ }
 }
 
 /**

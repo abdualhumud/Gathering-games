@@ -353,6 +353,23 @@ request takes ~1 min); rooms are in memory and reset on restart/deploy.
 
 ---
 
+## Security (keep these when changing the server or client)
+
+- **Origins:** browsers may only connect from the server's own origin, `https://abdualhumud.github.io`
+  or localhost/LAN dev (`originAllowed` in server/index.js). Extra origins via env `CORS_ORIGIN`
+  (comma-separated; `*` disables the check — don't set it in render.yaml).
+- **Abuse limits (in memory):** ≤ 40 sockets per IP (`GG_MAX_SOCKETS_PER_IP` — a whole gathering shares one home IP), ≤ 12 room creations
+  per IP per 10 min (`GG_MAX_CREATES_PER_IP`), ≤ 300 rooms total (`GG_MAX_ROOMS`), 25 requests/s
+  per socket (`GG_RATE_MAX`, flooding at 8× disconnects), 100 KB max message. IP = first
+  `X-Forwarded-For` hop (`trust proxy` 1 — Render's proxy).
+- **Input:** every handler is wrapped and validated; names/team names go through `cleanName`
+  (strips control, `<>`, zero-width and bidi-override characters, max 20). Answers never leave the
+  server before the question resolves; tokens are never included in `room:state`.
+- **Headers:** nosniff, `X-Frame-Options: SAMEORIGIN`, Referrer-Policy, Permissions-Policy, COOP,
+  HSTS on https. The built site carries a CSP `<meta>` (vite.config.js `cspPlugin`, build only):
+  scripts only from self — never add inline `<script>` or third-party script tags.
+- **Dependencies:** `npm audit` must stay at 0 for root and client.
+
 ## Sound effects
 
 `client/src/sound.js` synthesizes all sounds with Web Audio (no files): `buzz`, `correct`,

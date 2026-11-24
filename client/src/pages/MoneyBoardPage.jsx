@@ -214,14 +214,10 @@ function useLocalGame() {
     _resolveAnswer(isCorrect, cell, answerIdx);
   };
 
-  const timeUp = useCallback(() => {
-    if (phase !== 'answer' && phase !== 'steal') return;
-    setTimer(false);
-    if (answerMode === 'host') return; // the host still decides who answered
-    const { colIdx, rowIdx } = activeCell;
-    const cell = board[colIdx].cells[rowIdx];
-    _resolveAnswer(false, cell);
-  }, [phase, activeCell, board, answerMode]); // eslint-disable-line
+  // The timer keeps a stable onEnd, so it must read the *latest* state (powers such as
+  // «إجابتين» can be switched on after the clock started).
+  const latestRef = useRef(null);
+  const timeUp = useCallback(() => latestRef.current?.(), []);
 
   function _resolveAnswer(isCorrect, cell, answerIdx = null) {
     clearTimeout(timeoutRef.current);
@@ -232,7 +228,6 @@ function useLocalGame() {
     if (isCorrect) {
       const winner  = activeTeam;
       const earned  = isDoubled ? cell.points * 2 : cell.points;
-      const opponent = winner === 'A' ? 'B' : 'A';
       // الحفرة: also deduct from opponent
       const oppDeduct = isHafra ? cell.points : 0;
       const newTeams = {
@@ -314,6 +309,16 @@ function useLocalGame() {
       }
     }
   }
+
+  useEffect(() => {
+    latestRef.current = () => {
+      if (phase !== 'answer' && phase !== 'steal') return;
+      setTimer(false);
+      if (answerMode === 'host') return; // the host still decides who answered
+      const { colIdx, rowIdx } = activeCell;
+      _resolveAnswer(false, board[colIdx].cells[rowIdx]);
+    };
+  });
 
   // ── Host mode: the host reveals the answer and says who got it ──────────
   const revealAnswer = () => { setTimer(false); setRevealed(true); };
@@ -738,7 +743,7 @@ export function MoneyScores({ teams, currentTurn, myTeam }) {
   );
 }
 
-export function BoardGrid({ board, activeCell, onPickCell, canPick, currentTurn }) {
+export function BoardGrid({ board, activeCell, onPickCell, canPick }) {
   if (!board) return null;
   return (
     <div className="mb-board-frame">
@@ -851,7 +856,6 @@ export function ModeratorPanel({ teams, onAdjust, onClose }) {
 }
 
 export function GameOverScreen({ teams, winner, isTie, myTeam, stats, onReset, onHome }) {
-  const aM = teams.A.money, bM = teams.B.money;
   const winnerName = winner ? teams[winner]?.name : null;
   const isMyTeamWin = myTeam && myTeam === winner;
   return (

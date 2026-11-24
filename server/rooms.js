@@ -13,15 +13,21 @@ const crypto = require('crypto');
 const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no 0/O, 1/I/L
 const CODE_LEN = 5;
 const MAX_PLAYERS = 16;
+const MAX_ROOMS = Number(process.env.GG_MAX_ROOMS) || 300;   // memory guard
 const LOBBY_DROP_MS = 30 * 1000;          // disconnected in lobby → seat removed
 const EMPTY_ROOM_TTL_MS = 15 * 60 * 1000;  // nobody connected → room deleted
 const MAX_ROOM_AGE_MS = 8 * 60 * 60 * 1000;
 
 const randId = (bytes = 9) => crypto.randomBytes(bytes).toString('base64url');
 
+// Strips control characters, angle brackets and invisible / direction-override
+// characters (U+200B–U+200F, U+202A–U+202E, U+2066–U+2069, U+FEFF) that could be
+// used to spoof another player's name or flip the layout.
 function cleanName(raw) {
   if (typeof raw !== 'string') return '';
-  return raw.replace(/[\u0000-\u001f\u007f<>]/g, '').replace(/\s+/g, ' ').trim().slice(0, 20);
+  return raw
+    .replace(/[\u0000-\u001f\u007f-\u009f<>\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/g, '')
+    .replace(/\s+/g, ' ').trim().slice(0, 20);
 }
 
 class Room {
@@ -87,6 +93,7 @@ class Room {
     }
     player.socketId = socket.id;
     player.connected = true;
+    if (player.role === 'display') this.hostId = player.id;   // the TV always gets control back
     this.emptySince = null;
     socket.join(this.code);
     this.manager.bySocket.set(socket.id, { code: this.code, playerId: player.id });
@@ -161,6 +168,7 @@ class RoomManager {
   create(type, options) {
     const GameClass = this.types[type];
     if (!GameClass) return null;
+    if (this.rooms.size >= MAX_ROOMS) { this.sweep(); if (this.rooms.size >= MAX_ROOMS) return null; }
     const room = new Room(this, this.newCode(), type, GameClass, options);
     this.rooms.set(room.code, room);
     return room;

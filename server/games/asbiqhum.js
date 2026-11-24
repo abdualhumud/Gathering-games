@@ -34,7 +34,15 @@ class AsbiqhumGame extends BaseGame {
   }
 
   onJoin(p) { if (p.role !== 'display') this.scores[p.id] = 0; }
-  onLeave(p) { delete this.scores[p.id]; }
+  onLeave(p) {
+    delete this.scores[p.id];
+    this.locked.delete(p.id);
+    // kicked/left while holding the buzzer → give the question back to the others
+    if (this.phase === 'buzzed' && this.buzzerId === p.id) {
+      if (this.timeLeftMs > 2000 && this.room.activePlayers().some(x => x.id !== p.id)) this.openQuestion(Math.ceil(this.timeLeftMs / 1000));
+      else this.showResult({ kind: 'timeout' });
+    }
+  }
 
   handle(player, type, data) {
     switch (type) {

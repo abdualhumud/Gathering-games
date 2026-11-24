@@ -1,4 +1,4 @@
-import { HashRouter, Routes, Route, useLocation } from 'react-router-dom';
+import { HashRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import SoundToggle from './components/SoundToggle';
 import Home from './pages/Home';
 import AsbiqhumPage from './pages/AsbiqhumPage';
@@ -14,6 +14,7 @@ export default function App() {
         <Route path="/asbiqhum" element={<AsbiqhumPage />} />
         <Route path="/huroof" element={<HuroofPage />} />
         <Route path="/moneyboard" element={<MoneyBoardPage />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </HashRouter>
   );

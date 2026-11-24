@@ -24,6 +24,9 @@ export default defineConfig([
     },
     rules: {
       'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }],
+      // Page files also export small shared pieces used by their online-room screens;
+      // that only affects dev hot-reload, so keep it a warning.
+      'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
     },
   },
 ])

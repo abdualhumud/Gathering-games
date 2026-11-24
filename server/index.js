@@ -22,21 +22,83 @@ const { MoneyBoardGame, VALID_CATEGORIES } = require('./games/moneyboard');
 const { questions } = require('./questions');
 
 const PORT = process.env.PORT || 3001;
-// Comma-separated list of allowed browser origins, or "*" (default).
-const ORIGINS = (process.env.CORS_ORIGIN || '*').split(',').map(s => s.trim()).filter(Boolean);
-const corsOrigin = ORIGINS.includes('*') ? '*' : ORIGINS;
+
+// ── Who may connect from a browser ────────────────────────────────────────────
+// Same-origin pages (the server hosting the site) and requests without an Origin
+// header (curl, health checks) are always allowed. Other origins must be listed in
+// CORS_ORIGIN (comma-separated; "*" = anyone). Default: the GitHub Pages site +
+// local development.
+const DEFAULT_ORIGINS = ['https://abdualhumud.github.io'];
+const ORIGINS = (process.env.CORS_ORIGIN || '').split(',').map(s => s.trim()).filter(Boolean);
+const ALLOW_ANY = ORIGINS.includes('*');
+const LOCAL = /^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+)(:\d+)?$/;
+function originAllowed(origin, host) {
+  if (!origin || ALLOW_ANY) return true;
+  try { if (new URL(origin).host === host) return true; } catch { return false; }
+  return DEFAULT_ORIGINS.includes(origin) || ORIGINS.includes(origin) || LOCAL.test(origin);
+}
 
 const app = express();
-app.use(cors({ origin: corsOrigin }));
 app.disable('x-powered-by');
+app.set('trust proxy', 1);   // behind Render's proxy: req.ip / protocol come from X-Forwarded-*
+
+// Security headers for everything the server sends
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+  if (req.secure) res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  next();
+});
+app.use(cors((req, cb) => cb(null, { origin: originAllowed(req.header('Origin'), req.header('Host')) })));
 
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: { origin: corsOrigin, methods: ['GET', 'POST'] },
+  // Origin is checked in allowRequest (needs the Host header for same-origin pages).
+  allowRequest: (req, cb) => cb(null, originAllowed(req.headers.origin, req.headers.host)),
+  cors: { origin: (origin, cb) => cb(null, true), methods: ['GET', 'POST'] },
   pingInterval: 20000,
   pingTimeout: 25000,
   maxHttpBufferSize: 1e5,
 });
+
+// ── Per-IP limits (simple in-memory abuse guard) ──────────────────────────────
+// Generous on purpose: at a gathering everyone shares the home Wi-Fi's public IP.
+const MAX_SOCKETS_PER_IP = Number(process.env.GG_MAX_SOCKETS_PER_IP) || 40;
+const CREATE_WINDOW_MS = 10 * 60 * 1000;
+const MAX_CREATES_PER_IP = Number(process.env.GG_MAX_CREATES_PER_IP) || 12;
+const socketsByIp = new Map();   // ip → count
+const createsByIp = new Map();   // ip → [timestamps]
+const clientIp = socket => {
+  const fwd = socket.handshake.headers['x-forwarded-for'];
+  return (typeof fwd === 'string' && fwd.split(',')[0].trim()) || socket.handshake.address || 'unknown';
+};
+io.use((socket, next) => {
+  const ip = clientIp(socket);
+  const n = socketsByIp.get(ip) || 0;
+  if (n >= MAX_SOCKETS_PER_IP) return next(new Error('too many connections'));
+  socketsByIp.set(ip, n + 1);
+  socket.data.ip = ip;
+  socket.on('disconnect', () => {
+    const left = (socketsByIp.get(ip) || 1) - 1;
+    if (left > 0) socketsByIp.set(ip, left); else socketsByIp.delete(ip);
+  });
+  next();
+});
+function mayCreateRoom(ip) {
+  const now = Date.now();
+  const recent = (createsByIp.get(ip) || []).filter(t => now - t < CREATE_WINDOW_MS);
+  if (recent.length >= MAX_CREATES_PER_IP) { createsByIp.set(ip, recent); return false; }
+  recent.push(now);
+  createsByIp.set(ip, recent);
+  return true;
+}
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, ts] of createsByIp) if (!ts.some(t => now - t < CREATE_WINDOW_MS)) createsByIp.delete(ip);
+}, 60 * 1000).unref();
 
 const rooms = new RoomManager(io, {
   asbiqhum: AsbiqhumGame,
@@ -75,7 +137,9 @@ io.on('connection', (socket) => {
   const limited = () => {
     const now = Date.now();
     if (now - windowStart > RATE_WINDOW_MS) { windowStart = now; count = 0; }
-    return ++count > RATE_MAX;
+    count++;
+    if (count > RATE_MAX * 8) socket.disconnect(true);   // flooding: drop the connection
+    return count > RATE_MAX;
   };
 
   // Wrap every handler: validate the ack, never let an exception kill the process.
@@ -98,7 +162,7 @@ io.on('connection', (socket) => {
     rooms.bySocket.delete(socket.id);
     const { room, player } = cur;
     if (room.game.phase === 'lobby') room.removePlayer(player.id);
-    else { player.connected = false; player.socketId = null; room.game.onDisconnect && room.game.onDisconnect(player); }
+    else room.detach(player);   // keeps the seat, marks the room empty if nobody is left
     if (room.players.size === 0) { room.destroy(); rooms.rooms.delete(room.code); return; }
     if (room.hostId === player.id) room.pickNewHost();
     room.broadcast();
@@ -115,8 +179,10 @@ io.on('connection', (socket) => {
     const n = cleanName(name) || (display ? 'شاشة العرض' : '');
     if (!n) return { ok: false, error: 'أدخل اسمك' };
     if (!rooms.types[game]) return { ok: false, error: 'لعبة غير معروفة' };
+    if (!mayCreateRoom(socket.data.ip)) return { ok: false, error: 'أنشأت غرفاً كثيرة — انتظر قليلاً ثم حاول' };
+    const room = rooms.create(game, options && typeof options === 'object' ? options : {});
+    if (!room) return { ok: false, error: 'الخادم مشغول الآن — حاول بعد قليل' };
     leaveCurrent();
-    const room = rooms.create(game, options);
     const { player, error } = display
       ? room.addPlayer(n, { team: null, role: 'display' })
       : room.addPlayer(n, { team: room.game.normaliseTeam ? room.game.normaliseTeam(team) : null });

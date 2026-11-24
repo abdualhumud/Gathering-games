@@ -13,6 +13,8 @@ services:
     envVars:
       - key: NODE_VERSION
         value: "20"
-      # Allow the GitHub Pages site to reach this server
-      - key: CORS_ORIGIN
-        value: "*"
+      # Browser origins allowed besides the server itself: the GitHub Pages site and
+      # local development are allowed by default (server/index.js). Add others here,
+      # comma-separated, only if you host the site somewhere else:
+      # - key: CORS_ORIGIN
+      #   value: "https://example.com"

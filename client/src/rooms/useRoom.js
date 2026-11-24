@@ -50,7 +50,8 @@ export function useRoom(game) {
     const onState = st => { if (st.game === game) setState(st); };
     const onGone = msg => () => { saveSeat(game, null); setState(null); setNotice(msg); };
     const onKicked = onGone('أخرجك المضيف من الغرفة');
-    const onReplaced = onGone('فُتحت نفس الجلسة في نافذة أخرى');
+    // the seat moved to another tab of this device — keep the saved seat for that tab
+    const onReplaced = () => { setState(null); setNotice('فُتحت نفس الجلسة في نافذة أخرى'); };
     s.on('connect', onConnect);
     s.on('disconnect', onDisconnect);
     s.on('connect_error', onConnectError);

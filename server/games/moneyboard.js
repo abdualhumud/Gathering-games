@@ -7,6 +7,7 @@
 //  • Super powers (once per game per team): double, two, hafra, friend, block.
 const { SCALE, BaseGame, isIndex, publicQuestion } = require('./base');
 const { questions, shuffle, withShuffledOptions } = require('../questions');
+const { cleanName } = require('../rooms');
 
 const VALID_CATEGORIES = [...new Set(questions.map(q => q.category))]
   .filter(cat => questions.filter(q => q.category === cat).length >= 6);
@@ -76,7 +77,7 @@ class MoneyBoardGame extends BaseGame {
         if (data.random) this.categories = shuffle(VALID_CATEGORIES).slice(0, 6);
         if (data.answerBy === 'any' || data.answerBy === 'captain') this.answerBy = data.answerBy;
         for (const t of TEAMS) {
-          const name = data.teamNames && typeof data.teamNames[t] === 'string' ? data.teamNames[t].trim().slice(0, 20) : '';
+          const name = data.teamNames ? cleanName(data.teamNames[t]) : '';
           if (name) this.teamNames[t] = name;
         }
         return null;

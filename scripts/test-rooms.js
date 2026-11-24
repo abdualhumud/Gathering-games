@@ -2,6 +2,7 @@
 // server, with timers shrunk (GG_TIME_SCALE). Run: npm run test:rooms
 process.env.GG_TIME_SCALE = process.env.GG_TIME_SCALE || '0.02';
 process.env.GG_RATE_MAX = '100';
+process.env.GG_MAX_CREATES_PER_IP = process.env.GG_MAX_CREATES_PER_IP || '30';
 const assert = require('assert');
 const { io: connect } = require('socket.io-client');
 const { server, rooms } = require('../server/index.js');
@@ -239,6 +240,36 @@ async function testDisplayAndCaptain(url) {
   console.log('✓ display seat (no score, host, cannot play) + captains (gate, host change, auto fallback)');
 }
 
+async function testSecurity(url) {
+  // CORS: foreign sites are refused, the GitHub Pages site and same-origin are allowed
+  const probe = origin => fetch(url + '/socket.io/?EIO=4&transport=polling', { headers: origin ? { Origin: origin } : {} }).then(r => r.status);
+  assert.strictEqual(await probe('https://evil.example'), 403, 'foreign origin refused');
+  assert.strictEqual(await probe('https://abdualhumud.github.io'), 200, 'pages origin allowed');
+  assert.strictEqual(await probe(null), 200, 'no origin (same-origin / tools) allowed');
+  // security headers
+  const res = await fetch(url + '/api/health');
+  assert.strictEqual(res.headers.get('x-content-type-options'), 'nosniff');
+  assert.strictEqual(res.headers.get('x-frame-options'), 'SAMEORIGIN');
+  assert(!res.headers.get('x-powered-by'), 'no x-powered-by');
+  // names: invisible / direction-override characters are stripped
+  const a = client(url);
+  const r = await a.req('room:create', { game: 'asbiqhum', name: '\u202Eسارة\u200B<b>' });
+  assert(r.ok);
+  await a.until(s => s.players.length === 1);
+  assert.strictEqual(a.state.players[0].name, 'سارةb', 'cleaned name');
+  // room-creation flood from one address is cut off
+  let refused = false;
+  for (let i = 0; i < 40 && !refused; i++) refused = !(await a.req('room:create', { game: 'asbiqhum', name: 'x' })).ok;
+  assert(refused, 'room creation is rate limited per address');
+  a.close();
+  // connection flood from one address is cut off
+  const many = Array.from({ length: 45 }, () => connect(url, { transports: ['websocket'], forceNew: true, reconnection: false }));
+  const results = await Promise.all(many.map(s => new Promise(res => { s.on('connect', () => res('ok')); s.on('connect_error', () => res('refused')); })));
+  assert(results.includes('refused'), 'too many sockets from one address refused');
+  many.forEach(s => s.close());
+  console.log('✓ security: CORS allow-list, headers, name cleaning, room-creation + connection limits');
+}
+
 (async () => {
   await new Promise(r => server.listen(0, r));
   const url = `http://localhost:${server.address().port}`;
@@ -248,6 +279,7 @@ async function testDisplayAndCaptain(url) {
     await testMoney(url);
     await testHuroof(url);
     await testDisplayAndCaptain(url);
+    await testSecurity(url);   // last: it uses up this address's quotas
     const health = await (await fetch(url + '/api/health')).json();
     assert.strictEqual(health.status, 'ok');
     console.log('✓ health', JSON.stringify(health));
