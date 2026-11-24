@@ -85,6 +85,7 @@ async function testMoney(url) {
     st = await a.until(s => s.phase === 'pick' || s.phase === 'over');
     if (st.phase === 'over') break;
     const turn = st.currentTurn;
+    assert.strictEqual(turn, n % 2 === 0 ? 'A' : 'B', 'turns alternate every cell (no streaks)');
     const picker = players[turn], opp = players[turn === 'A' ? 'B' : 'A'];
     let col = -1, row = -1;
     st.board.some((c, ci) => c.cells.some((x, ri) => !x.answered && ((col = ci), (row = ri), true)));

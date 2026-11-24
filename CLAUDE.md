@@ -236,7 +236,8 @@ options; super powers as soft round tokens. Amounts use Latin digits (`toLocaleS
 - 36 distinct questions per board, exact difficulty per row (falls back ±1 only if a category runs out); options shuffled; unseen preferred
 - Wrong option stays struck-through for the stealing team / second attempt;
   after resolution the correct answer is highlighted. Game over shows per-team stats.
-- Alternating turns; the active team picks a cell
+- **Strictly alternating turns — no streaks:** after every cell (right, wrong, stolen or skipped)
+  the *other* team picks the next cell, in both answer modes and online (`closeCell` → `other(originalTeam)`)
 - 30s to answer; wrong → opponent gets 15s steal chance
 - All 36 cells filled → game over, highest money wins
 

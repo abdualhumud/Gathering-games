@@ -3,7 +3,7 @@
 //  • 6 categories × 6 cells: 2×200 (سهل), 2×400 (متوسط), 2×600 (صعب).
 //  • The team whose turn it is picks a cell; any member may answer (first answer counts).
 //  • Wrong → the other team gets one steal attempt (the wrong option stays struck).
-//  • Correct → that team picks next. Failed steal → the picking team picks next.
+//  • Turns always alternate: after every cell the other team picks (no streaks).
 //  • Super powers (once per game per team): double, two, hafra, friend, block.
 const { SCALE, BaseGame, isIndex, publicQuestion } = require('./base');
 const { questions, shuffle, withShuffledOptions } = require('../questions');
@@ -205,7 +205,6 @@ class MoneyBoardGame extends BaseGame {
     if (deduct) this.teams[other(winner)].money = Math.max(0, this.teams[other(winner)].money - deduct);
     this.stats[winner].correct++;
     if (this.phase === 'steal') this.stats[winner].steals++;
-    this.currentTurn = winner;
     this.closeCell(winner, { points: earned, hafraPoints: deduct, by: player.name, selected: index });
   }
 
@@ -225,7 +224,6 @@ class MoneyBoardGame extends BaseGame {
       this.countdown(STEAL_TIME, () => this.wrong(null));
       return;
     }
-    this.currentTurn = this.originalTeam;
     this.closeCell(null, { by: player ? player.name : null, selected: index ?? null });
   }
 
@@ -234,7 +232,7 @@ class MoneyBoardGame extends BaseGame {
     c.answered = true;
     c.winner = winner;
     this.answered++;
-    if (extra.skipped) this.currentTurn = this.originalTeam;
+    this.currentTurn = other(this.originalTeam);   // no streaks: turns always alternate
     this.result = { winner, correctAnswer: c.question.answer, points: 0, hafraPoints: 0, ...extra };
     this.phase = 'result';
     this.after(RESULT_MS, () => {

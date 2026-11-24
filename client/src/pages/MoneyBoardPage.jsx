@@ -259,7 +259,7 @@ function useLocalGame() {
       }));
       setResultInfo({ isCorrect: true, winner, points: earned, hafra: isHafra && oppDeduct > 0, hafraPoints: oppDeduct, correctAnswer: cell.question?.answer, teams: newTeams });
       setPhase('result');
-      setTurn(winner);
+      setTurn(originalTeam === 'A' ? 'B' : 'A');   // no streaks: the other team always picks next
       resetPowers();
       if (newCount >= totalCells) {
         timeoutRef.current = setTimeout(() => setScreen('gameover'), 2200);
@@ -303,7 +303,7 @@ function useLocalGame() {
         markWrong();
         setResultInfo({ isCorrect: false, winner: null, points: 0, correctAnswer: cell.question?.answer, teams });
         setPhase('result');
-        setTurn(originalTeam);
+        setTurn(originalTeam === 'A' ? 'B' : 'A');
         resetPowers();
         if (newCount >= totalCells) {
           timeoutRef.current = setTimeout(() => setScreen('gameover'), 2200);
@@ -348,7 +348,7 @@ function useLocalGame() {
     }
     setResultInfo({ isCorrect: !!winner, winner, points: earned, hafra: oppDeduct > 0, hafraPoints: oppDeduct, correctAnswer: cell.question?.answer, teams: newTeams });
     setPhase('result');
-    setTurn(picker === 'A' ? 'B' : 'A');  // turns alternate in host mode
+    setTurn(picker === 'A' ? 'B' : 'A');  // turns always alternate
     setIsDoubled(false); setIsTwoAnswers(false); setIsHafra(false); setFriendTimer(false);
     timeoutRef.current = setTimeout(() => {
       if (newCount >= totalCells) { setScreen('gameover'); return; }
