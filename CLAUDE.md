@@ -345,8 +345,9 @@ Games: `asbiqhum` · `money` · `huroof`. Server → client also `room:kicked`, 
 
 **Where the server runs** — client `socket.js` resolves the URL: saved «عنوان الخادم» in the
 room screen → `VITE_SERVER_URL` (Pages build reads repo variable `SERVER_URL`) → `:3001` on
-localhost → same origin (when the server hosts the site). On `*.github.io` with nothing set the
-room screen shows «لم يُضبط خادم» and lets the user paste an address.
+localhost → on `*.github.io` the Render server `https://gathering-games.onrender.com` (`GAME_SERVER`
+in socket.js) → otherwise same origin (when the server hosts the site). Players can still paste another
+address in the room screen («عنوان الخادم»).
 `render.yaml` deploys one free Render web service that builds the client and serves both the
 site (`/Gathering-games/`) and the sockets. Free instances sleep after ~15 min idle (first
 request takes ~1 min); rooms are in memory and reset on restart/deploy.

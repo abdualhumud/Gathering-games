@@ -4,8 +4,10 @@ import { io } from 'socket.io-client';
 //  1. a URL the user saved in the room screen («عنوان الخادم»)
 //  2. VITE_SERVER_URL baked in at build time (GitHub Pages build → repo variable SERVER_URL)
 //  3. local dev / preview → same host on port 3001
-//  4. otherwise the site itself is served by the game server → same origin
+//  4. on github.io → the Render game server (GAME_SERVER)
+//  5. otherwise the site itself is served by the game server → same origin
 const KEY = 'gg-server-url';
+const GAME_SERVER = 'https://gathering-games.onrender.com';   // free Render web service (render.yaml)
 
 function stored() {
   try { return localStorage.getItem(KEY) || ''; } catch { return ''; }
@@ -18,7 +20,8 @@ export function defaultServerUrl() {
   if (hostname === 'localhost' || hostname === '127.0.0.1' || /^192\.168\./.test(hostname)) {
     return `${protocol}//${hostname}:3001`;
   }
-  if (hostname.endsWith('github.io')) return '';   // static hosting: no server here
+  // The GitHub Pages site has no server of its own: use the Render game server.
+  if (hostname.endsWith('github.io')) return GAME_SERVER;
   return origin;
 }
 
