@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import QR from 'qrcode';
 import { getServerUrl, setServerUrl } from '../socket';
 import { inviteCode, inviteLink } from './roomUtils';
@@ -20,6 +20,14 @@ export function ServerStatus({ room }) {
     'no-server': 'لم يُضبط خادم للغرف',
   }[room.status];
   const save = () => { const u = setServerUrl(url); setUrl(u); room.changeServer(u); setOpen(false); };
+  // how long we have been trying — a free server needs up to a minute to wake up
+  const [waited, setWaited] = useState(0);
+  useEffect(() => {
+    if (room.status === 'online' || room.status === 'no-server') return undefined;
+    const t0 = Date.now();
+    const id = setInterval(() => setWaited(Math.round((Date.now() - t0) / 1000)), 1000);
+    return () => { clearInterval(id); setWaited(0); };
+  }, [room.status]);
   return (
     <div className="rk-server">
       <div className="rk-server-row">
@@ -27,8 +35,16 @@ export function ServerStatus({ room }) {
         <span className="rk-server-label">{label}</span>
         <button className="rk-link" onClick={() => setOpen(o => !o)}>{open ? 'إغلاق' : 'عنوان الخادم'}</button>
       </div>
-      {room.status === 'offline' && !open && (
-        <p className="rk-hint">إذا كان الخادم مجانياً قد يحتاج دقيقة ليستيقظ. تأكد من العنوان أو جرّب لاحقاً.</p>
+      {(room.status === 'offline' || room.status === 'connecting') && !open && (
+        <div className="rk-wake">
+          <p className="rk-hint">
+            {waited < 5
+              ? 'نتصل بالخادم…'
+              : 'الخادم المجاني ينام إذا ما أحد استخدمه، وأول مرة يحتاج حتى دقيقة ليصحى. ننتظر ونعيد المحاولة تلقائياً — لا تغلق الصفحة.'}
+            {waited >= 5 && <b className="rk-wait-sec"> ({waited} ثانية)</b>}
+          </p>
+          <button className="rk-btn small ghost" onClick={room.reconnect}>حاول الآن</button>
+        </div>
       )}
       {open && (
         <div className="rk-server-edit">
@@ -52,13 +68,17 @@ export function RoomEntry({ room, logo, teams, defaultTeam, createOptions, onExi
   const ready = room.status === 'online';
   const run = async fn => { setBusy(true); saveName(name.trim()); await fn(); setBusy(false); };
   const extra = teams ? { team } : {};
+  const createIt = () => run(() => room.create(name.trim(), { ...extra, options: createOptions }));
+  // why are the buttons greyed out? Say it instead of leaving the user guessing.
+  const why = !ready ? 'ننتظر اتصال الخادم قبل أن تعمل الأزرار.' : !name.trim() ? 'اكتب اسمك أولاً لتفعيل الأزرار.' : '';
   return (
     <div className="rk-card pop-in">
       {logo}
       <ServerStatus room={room} />
       <label className="rk-label">اسمك</label>
       <input className="rk-input" placeholder="اكتب اسمك" value={name} maxLength={20}
-        onChange={e => setName(e.target.value)} />
+        onChange={e => setName(e.target.value)}
+        onKeyDown={e => { if (e.key === 'Enter' && ready && name.trim() && !busy) { if (code.length >= 4) run(() => room.join(code, name.trim(), extra)); else createIt(); } }} />
       {teams && (
         <>
           <label className="rk-label">فريقك</label>
@@ -74,10 +94,10 @@ export function RoomEntry({ room, logo, teams, defaultTeam, createOptions, onExi
       {room.notice && <div className="rk-notice">{room.notice}</div>}
       {!code && (
         <>
-          <button className="rk-btn" disabled={!ready || busy || !name.trim()}
-            onClick={() => run(() => room.create(name.trim(), { ...extra, options: createOptions }))}>
+          <button className="rk-btn" disabled={!ready || busy || !name.trim()} onClick={createIt}>
             إنشاء غرفة جديدة
           </button>
+          {why && <p className="rk-why">{why}</p>}
           <button className="rk-tv-btn" disabled={!ready || busy}
             onClick={() => run(() => room.create('', { display: true, options: createOptions }))}>
             <span className="rk-tv-icon" aria-hidden="true" />
@@ -85,6 +105,7 @@ export function RoomEntry({ room, logo, teams, defaultTeam, createOptions, onExi
           </button>
         </>
       )}
+      {code && why && <p className="rk-why">{why}</p>}
       <div className="rk-or"><span>{code ? 'الانضمام للغرفة' : 'أو انضم برمز'}</span></div>
       <div className="rk-row">
         <input className="rk-input rk-code-input" dir="ltr" placeholder="رمز الغرفة" value={code} maxLength={6}

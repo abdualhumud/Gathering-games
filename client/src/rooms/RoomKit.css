@@ -165,3 +165,8 @@
   .rk-code.big .rk-code-value { font-size: 2.6rem; }
   .rk-setting { flex-direction: column; align-items: stretch; }
 }
+
+/* ── wake-up message + why-disabled hint ── */
+.rk-wake { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.rk-wait-sec { color: var(--text); font-variant-numeric: tabular-nums; }
+.rk-why { margin: -4px 0 0; text-align: center; font-size: 0.85rem; font-weight: 700; color: var(--muted); }

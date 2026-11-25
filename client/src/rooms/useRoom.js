@@ -99,9 +99,16 @@ export function useRoom(game) {
   }, [game, request]);
 
   const changeServer = useCallback(url => { setStatus('connecting'); setUrl(url); }, []);
+  /** «حاول الآن»: wake a sleeping server / retry immediately. */
+  const reconnect = useCallback(() => {
+    const s = getSocket();
+    if (!s) return;
+    setStatus('connecting');
+    if (!s.connected) s.connect();
+  }, []);
 
   const me = state ? state.players.find(p => p.id === state.youId) : null;
-  return { status, state, me, error, notice, setError, create, join, act, leave, serverUrl, changeServer };
+  return { status, state, me, error, notice, setError, create, join, act, leave, serverUrl, changeServer, reconnect };
 }
 
 /** True when this device holds a seat in a room of `game` (used to resume after refresh). */
